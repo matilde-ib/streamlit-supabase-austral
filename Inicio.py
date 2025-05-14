@@ -3,21 +3,25 @@ import streamlit as st
 
 # --- Page Configuration (Optional but Recommended) ---
 st.set_page_config(
-    page_title="Kiosco App - Login",
-    page_icon="🛒",
+    page_title="TissBank",
+    page_icon="🧬",
     layout="centered" # "wide" or "centered"
 )
 
 # --- Main Application ---
-st.title("App")
+# Usando columnas para centrar
+col1, col2, col3 = st.columns([1, 2, 1])
+with col2:
+    st.image("images/logo.png", width=300)
+
 
 
 # Check if the user is already logged in (using session state)
 if not st.session_state.get("logged_in", False):
     # If not logged in, show the login form
     with st.form("login_form"):
-        username = st.text_input("Username (any value)")
-        password = st.text_input("Password (any value)", type="password")
+        username = st.text_input("Usuario (any value)")
+        password = st.text_input("Clave (any value)", type="password")
         submitted = st.form_submit_button("Login")
 
         if submitted:
