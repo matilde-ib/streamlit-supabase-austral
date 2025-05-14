@@ -3,7 +3,7 @@ from functions import connect_to_supabase, execute_query  # importar tu archivo
 import pandas as pd
 
 # Título
-st.title("Registro de Médico 🩺")
+st.title("Registro de Usuario 🩺")
 
 # Formulario
 with st.form("form_registro"):
@@ -30,6 +30,9 @@ if submit:
             
             if result:
                 st.success("✅ Médico registrado correctamente.")
+                # Redirigir a la página de inicio de sesión después del registro exitoso
+                st.info("Redirigiendo al inicio de sesión...")
+                st.experimental_rerun()  # Usar rerun o bien actualizar el estado para redirigir
             else:
                 st.error("❌ Error al registrar el médico.")
         except ValueError:

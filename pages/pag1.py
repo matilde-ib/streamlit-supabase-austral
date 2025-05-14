@@ -17,3 +17,9 @@ def mostrar_medicos():
 st.title("Medicos")
 # Llamada a la función
 mostrar_medicos()
+
+
+switch_page = st.button("Registros")
+if switch_page:
+    # Switch to the selected page
+    st.switch_page(Registros_medicos.py)
