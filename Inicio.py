@@ -1,6 +1,6 @@
 
 import streamlit as st
-#pari mogolico
+
 
 # --- Page Configuration (Optional but Recommended) ---
 st.set_page_config(
