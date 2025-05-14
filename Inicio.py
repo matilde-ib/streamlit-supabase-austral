@@ -1,6 +1,7 @@
 
 import streamlit as st
 
+
 # --- Page Configuration (Optional but Recommended) ---
 st.set_page_config(
     page_title="TissBank",
@@ -14,7 +15,7 @@ col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     st.image("images/logo.png", width=300)
 
-
+#hola
 
 # Check if the user is already logged in (using session state)
 if not st.session_state.get("logged_in", False):
