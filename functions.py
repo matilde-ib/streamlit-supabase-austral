@@ -1,106 +1,69 @@
-import psycopg2
-import os
-from dotenv import load_dotenv
-import pandas as pd
+# functions.py
 
-# Load environment variables from .env file
-load_dotenv()
+import os
+import psycopg2
+import pandas as pd
+from dotenv import load_dotenv
+import streamlit as st # Importa streamlit aquí para usar st.error
+
+load_dotenv() # Cargar variables de entorno del archivo .env
 
 def connect_to_supabase():
     """
-    Connects to the Supabase PostgreSQL database using transaction pooler details
-    and credentials stored in environment variables.
+    Establece una conexión con la base de datos Supabase usando psycopg2.
+    Retorna el objeto de conexión si es exitoso, None en caso contrario.
     """
     try:
-        # Retrieve connection details from environment variables
-        host = os.getenv("SUPABASE_DB_HOST")
-        port = os.getenv("SUPABASE_DB_PORT")
-        dbname = os.getenv("SUPABASE_DB_NAME")
-        user = os.getenv("SUPABASE_DB_USER")
-        password = os.getenv("SUPABASE_DB_PASSWORD")
-
-        # Check if all required environment variables are set
-        if not all([host, port, dbname, user, password]):
-            print("Error: One or more Supabase environment variables are not set.")
-            print("Please set SUPABASE_DB_HOST, SUPABASE_DB_PORT, SUPABASE_DB_NAME, SUPABASE_DB_USER, and SUPABASE_DB_PASSWORD.")
-            return None
-
-        # Establish the connection
         conn = psycopg2.connect(
-            host=host,
-            port=port,
-            dbname=dbname,
-            user=user,
-            password=password,
+            host=os.getenv("SUPABASE_DB_HOST"),
+            database=os.getenv("SUPABASE_DB_NAME"),
+            user=os.getenv("SUPABASE_DB_USER"),
+            password=os.getenv("SUPABASE_DB_PASSWORD"),
+            port=os.getenv("SUPABASE_DB_PORT")
         )
-        print("Successfully connected to Supabase database.")
         return conn
-    except psycopg2.Error as e:
-        print(f"Error connecting to Supabase database: {e}")
+    except Exception as e:
+        # Usamos st.error para mostrar el error en la interfaz de Streamlit
+        st.error(f"Error al conectar con Supabase: {e}")
         return None
 
+def execute_query(query, conn=None, params=None, is_select=True):
+    """
+    Ejecuta una consulta SQL en la base de datos Supabase.
+    `query`: La cadena SQL a ejecutar.
+    `conn`: Una conexión a la base de datos (opcional). Si no se proporciona, se crea una nueva.
+    `params`: Una tupla o lista de parámetros para la consulta (opcional).
+    `is_select`: Booleano, True si es una consulta SELECT, False para INSERT/UPDATE/DELETE.
 
-def execute_query(query, conn=None, is_select=True):
+    Si is_select es True, retorna un DataFrame con los resultados.
+    Si is_select es False, retorna True si la operación fue exitosa, False en caso contrario.
     """
-    Executes a SQL query and returns the results as a pandas DataFrame for SELECT queries,
-    or executes DML operations (INSERT, UPDATE, DELETE) and returns success status.
-    
-    Args:
-        query (str): The SQL query to execute
-        conn (psycopg2.extensions.connection, optional): Database connection object.
-            If None, a new connection will be established.
-        is_select (bool, optional): Whether the query is a SELECT query (True) or 
-            a DML operation like INSERT/UPDATE/DELETE (False). Default is True.
-            
-    Returns:
-        pandas.DataFrame or bool: A DataFrame containing the query results for SELECT queries,
-            or True for successful DML operations, False otherwise.
-    """
+    _conn = conn # Usar la conexión provista o None
+    if _conn is None:
+        _conn = connect_to_supabase()
+        if _conn is None:
+            # st.error("execute_query: No se pudo establecer conexión a la base de datos.") # Debugging
+            return pd.DataFrame() if is_select else False
+
     try:
-        # Create a new connection if one wasn't provided
-        close_conn = False
-        if conn is None:
-            conn = connect_to_supabase()
-            close_conn = True
-        
-        # Create cursor and execute query
-        cursor = conn.cursor()
-        cursor.execute(query)
-        
-        if is_select:
-            # Fetch all results for SELECT queries
-            results = cursor.fetchall()
-            
-            # Get column names from cursor description
-            colnames = [desc[0] for desc in cursor.description]
-            
-            # Create DataFrame
-            df = pd.DataFrame(results, columns=colnames)
-            result = df
-        else:
-            # For DML operations, commit changes and return success
-            conn.commit()
-            result = True
-        
-        # Close cursor and connection if we created it
-        cursor.close()
-        if close_conn:
-            conn.close()
-            
-        return result
+        with _conn.cursor() as cur:
+            if params is not None: # Usar 'is not None' para manejar correctamente tuplas vacías o None
+                cur.execute(query, params)
+            else:
+                cur.execute(query)
+
+            if is_select:
+                column_names = [desc[0] for desc in cur.description]
+                data = cur.fetchall()
+                return pd.DataFrame(data, columns=column_names)
+            else:
+                _conn.commit() # Confirmar cambios para INSERT, UPDATE, DELETE
+                return True
     except Exception as e:
-        print(f"Error executing query: {e}")
-        # Rollback any changes if an error occurred during DML operation
-        if conn and not is_select:
-            conn.rollback()
+        st.error(f"Error al ejecutar la consulta '{query[:50]}...': {e}") # Muestra parte de la query para debug
+        _conn.rollback() # Revertir cambios en caso de error para operaciones no-SELECT
         return pd.DataFrame() if is_select else False
-
-def add_employee(nombre, dni, telefono, fecha_contratacion, salario):
-    """
-    Adds a new employee to the Empleado table.
-    """
-
-    query = "INSERT INTO empleado (nombre, dni, telefono, fecha_contratacion, salario) VALUES (%s, %s, %s, %s, %s)"
-    params = (nombre, dni, telefono, fecha_contratacion, salario)
-    
-    return execute_query(query, params=params, is_select=False)
+    finally:
+        # Solo cerrar la conexión si fue creada dentro de esta función y no fue proporcionada externamente
+        if conn is None and _conn is not None:
+            _conn.close()
