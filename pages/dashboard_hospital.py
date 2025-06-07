@@ -1,4 +1,4 @@
-# pages/dashboard_hospital.py (Versión Completa, Funcional y Corregida)
+# pages/dashboard_hospital.py (Estética Final y Funcionalidad Completa)
 
 import streamlit as st
 import pandas as pd
@@ -14,28 +14,267 @@ from functions import connect_to_supabase, execute_query
 # --- Configuración de la Página ---
 st.set_page_config(page_title="TissBank - Portal Hospitalario", page_icon="🏥", layout="wide")
 
-# --- INYECCIÓN DE CSS PARA ESTÉTICA PROFESIONAL ---
+# --- NUEVA ESTÉTICA PROFESIONAL ---
 def load_css():
+    """
+    Sistema de estilos MEJORADO Y ARMONIOSO para aplicación de Banco de Tejidos
+    Diseño médico profesional con mejor consistencia visual y flujo cromático
+    """
     st.markdown("""
         <style>
+            /* ================================================================== */
+            /* IMPORTACIÓN DE FUENTES GOOGLE                                      */
+            /* ================================================================== */
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;600;700&display=swap');
+
+            /* ================================================================== */
+            /* VARIABLES DE DISEÑO - PALETA MÉDICA ARMONIOSA                      */
+            /* ================================================================== */
             :root {
-                --primary-color: #0078D4; --background-color: #F8F9FA; --card-background-color: #FFFFFF;
-                --text-color: #212529; --border-color: #DEE2E6; --font-family: 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+                /* Colores principales - Azul médico profesional */
+                --primary-color: #2563EB;           /* Azul médico principal */
+                --primary-light: #3B82F6;           /* Azul claro */
+                --primary-dark: #1D4ED8;            /* Azul oscuro */
+                --primary-ultra-light: #EFF6FF;     /* Azul ultra claro */
+                --primary-soft: #DBEAFE;            /* Azul suave */
+                
+                /* Colores secundarios - Verde médico */
+                --secondary-color: #059669;         /* Verde esmeralda médico */
+                --secondary-light: #10B981;         /* Verde claro */
+                --secondary-dark: #047857;          /* Verde oscuro */
+                --secondary-ultra-light: #ECFDF5;   /* Verde ultra claro */
+                
+                /* Colores de acento */
+                --accent-color: #DC2626;            /* Rojo médico para alertas */
+                --accent-warning: #F59E0B;           /* Ámbar de advertencia */
+                --accent-info: #0891B2;             /* Cian información */
+                
+                /* Colores de fondo COHERENTES */
+                --background-main: #F8FAFC;         /* Fondo principal */
+                --background-secondary: #F1F5F9;   /* Fondo secundario */
+                --background-card: #FFFFFF;        /* Fondo de tarjetas */
+                --background-sidebar: #FFFFFF;  /* Fondo sidebar */
+                --background-hover: #F1F5F9;       /* Fondo hover */
+                
+                /* Colores de texto CONSISTENTES */
+                --text-primary: #1E293B;           /* Texto principal */
+                --text-secondary: #475569;         /* Texto secundario */
+                --text-muted: #64748B;             /* Texto apagado */
+                --text-on-primary: #FFFFFF;        /* Texto sobre azul */
+                --text-on-dark: #F8FAFC;           /* Texto sobre oscuro */
+                
+                /* Bordes SUTILES pero visibles */
+                --border-color: #CBD5E1;           /* Borde principal */
+                --border-light: #E2E8F0;           /* Borde ligero */
+                --border-medium: #94A3B8;           /* Borde medio */
+                --border-accent: var(--primary-color); /* Borde con acento */
+                
+                /* Sombras PROFESIONALES */
+                --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.07), 0 1px 2px -1px rgba(0, 0, 0, 0.07);
+                --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+                --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+                --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+                --shadow-primary: 0 4px 14px 0 rgba(37, 99, 235, 0.15);
+                
+                /* Tipografía */
+                --font-primary: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+                --font-headings: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+                
+                /* Espaciado y bordes redondeados */
+                --radius-sm: 6px;
+                --radius-md: 8px;
+                --radius-lg: 12px;
+                --radius-xl: 16px;
+                
+                /* Transiciones */
+                --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
             }
-            [data-testid="stAppViewContainer"] > .main { background-color: var(--background-color); }
+
+            /* ================================================================== */
+            /* RESET Y BASE DE LA APLICACIÓN                                      */
+            /* ================================================================== */
+            
+            .stApp {
+                font-family: var(--font-primary);
+                background: var(--background-main);
+                color: var(--text-primary);
+            }
+            
+            [data-testid="stAppViewContainer"] > .main {
+                background: transparent;
+                padding: 1.5rem;
+                max-width: 1300px;
+                margin: 0 auto;
+            }
+            
+            #MainMenu, footer, .stDeployButton, header[data-testid="stHeader"] {
+                visibility: hidden;
+            }
+
+            /* ================================================================== */
+            /* SIDEBAR MEJORADO Y COHERENTE                                       */
+            /* ================================================================== */
+            
+            [data-testid="stSidebar"] {
+                background: var(--background-sidebar);
+                border-right: 1px solid var(--border-light);
+                padding: 1rem;
+            }
+            
+            /* Contenedor del radio en el sidebar */
+            [data-testid="stSidebar"] .stRadio > div {
+                border: 1px solid var(--border-light);
+                border-radius: var(--radius-lg);
+                padding: 0.5rem;
+                background-color: var(--background-main);
+            }
+            
+            /* Opción individual del radio */
+            [data-testid="stSidebar"] .stRadio > div > label {
+                display: block;
+                padding: 0.75rem 1rem;
+                border-radius: var(--radius-md);
+                transition: var(--transition);
+                cursor: pointer;
+            }
+
+            [data-testid="stSidebar"] .stRadio > div > label:hover {
+                background-color: var(--primary-ultra-light);
+                color: var(--primary-dark);
+            }
+
+            /* Opción seleccionada del radio */
+            [data-testid="stSidebar"] .stRadio [aria-checked="true"] {
+                 background: var(--primary-color);
+                 color: var(--text-on-primary);
+                 font-weight: 600;
+            }
+            
+            /* Título en la sidebar */
+            [data-testid="stSidebar"] .stMarkdown h1,
+            [data-testid="stSidebar"] .stMarkdown h2,
+            [data-testid="stSidebar"] .stMarkdown h3 {
+                color: var(--primary-dark);
+                font-family: var(--font-headings);
+            }
+
+            /* ================================================================== */
+            /* TÍTULOS Y ENCABEZADOS ARMONIZADOS                                  */
+            /* ================================================================== */
+            
+            .main h1, .main h2 {
+                font-family: var(--font-headings);
+                font-weight: 600;
+                color: var(--text-primary);
+                text-align: left;
+                margin: 1rem 0;
+            }
+            
+            .main h1 {
+                font-size: 2rem;
+                color: var(--primary-dark);
+            }
+
+            .main h2 {
+                font-size: 1.5rem;
+                color: var(--text-secondary);
+                border-bottom: 2px solid var(--border-light);
+                padding-bottom: 0.5rem;
+            }
+
+            /* ================================================================== */
+            /* CONTENEDORES Y TARJETAS COHESIVAS                                  */
+            /* ================================================================== */
+            
             .st-expander {
-                border: 1px solid var(--border-color); box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-                border-radius: 12px; background: var(--card-background-color); margin-bottom: 2rem;
+                border: 1px solid var(--border-color);
+                background: var(--background-card);
+                border-radius: var(--radius-lg);
+                box-shadow: var(--shadow-md);
+                margin-bottom: 1.5rem;
+                overflow: hidden;
+                transition: var(--transition);
             }
-            .st-expander header { font-size: 1.2rem; font-weight: 600; color: var(--primary-color); padding: 1rem; }
-            .stButton>button {
-                font-weight: 600; border-radius: 8px; border: 2px solid var(--primary-color);
-                background-color: var(--primary-color); color: white; padding: 0.6rem 1.2rem;
-                transition: all 0.2s ease-in-out;
+            
+            .st-expander:hover {
+                box-shadow: var(--shadow-lg);
+                border-color: var(--primary-light);
             }
-            .stButton>button:hover { background-color: white; color: var(--primary-color); }
+            
+            .st-expander summary {
+                font-family: var(--font-headings);
+                font-weight: 500;
+                font-size: 1.1rem;
+                color: var(--text-on-primary);
+                padding: 1rem 1.5rem;
+                background: var(--primary-color);
+                cursor: pointer;
+                transition: var(--transition);
+            }
+            
+            .st-expander summary:hover {
+                background: var(--primary-dark);
+            }
+            
+            .st-expander > div:last-child {
+                padding: 1.5rem;
+                background: var(--background-card);
+            }
+
+            /* ================================================================== */
+            /* FORMULARIOS Y CONTROLES UNIFORMES                                  */
+            /* ================================================================== */
+            
+            .stTextInput > div > div > input,
+            .stTextArea > div > div > textarea,
+            .stNumberInput > div > div > input,
+            .stDateInput > div > div > input {
+                background: var(--background-main);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-md);
+                color: var(--text-primary);
+                transition: var(--transition);
+            }
+
+            .stTextInput > div > div > input:focus,
+            .stTextArea > div > div > textarea:focus,
+            .stNumberInput > div > div > input:focus,
+            .stDateInput > div > div > input:focus {
+                border-color: var(--primary-color);
+                box-shadow: var(--shadow-primary);
+                outline: none;
+            }
+
+            /* ================================================================== */
+            /* BOTONES CONSISTENTES                                               */
+            /* ================================================================== */
+            
+            .stButton > button {
+                background: var(--primary-color);
+                color: var(--text-on-primary);
+                border: none;
+                border-radius: var(--radius-md);
+                padding: 0.75rem 1.5rem;
+                font-weight: 500;
+                font-family: var(--font-primary);
+                box-shadow: var(--shadow-sm);
+                transition: var(--transition);
+                cursor: pointer;
+            }
+            
+            .stButton > button:hover {
+                background: var(--primary-dark);
+                box-shadow: var(--shadow-md);
+                transform: translateY(-1px);
+            }
+            
+            .stButton > button:active {
+                transform: translateY(0);
+            }
+
         </style>
     """, unsafe_allow_html=True)
+
 
 # --- Funciones de Utilidad y Carga de Datos ---
 def haversine(lat1, lon1, lat2, lon2):
@@ -139,7 +378,6 @@ if opcion_utilidades == "Gestión de Inventario":
             condicion_recoleccion = st.text_area("Condición de Recolección", placeholder="Ej: óptima, sin patologías...")
             submitted = st.form_submit_button("Registrar Tejido", use_container_width=True)
             if submitted:
-                # Lógica de registro completa y funcional
                 id_donante_final = None
                 if st.session_state.tipo_donante == "Nuevo Donante":
                     if all([nombre_donante, apellido_donante, dni_donante]):
@@ -204,11 +442,7 @@ elif opcion_utilidades == "Gestión de Solicitudes":
     st.title("📬 Gestión de Solicitudes de Médicos")
     st.markdown("Revise y procese las solicitudes de tejido pendientes.")
     
-    query = """
-        SELECT s.id, s.fecha_solicitud, s.tipo, s.ubicacion, m.nombre, m.apellido 
-        FROM solicitud s JOIN medico m ON s.medico_id = m.id WHERE s.estado = 'pendiente' ORDER BY s.fecha_solicitud ASC;
-    """
-    solicitudes_df = execute_query(query, conn=conn, is_select=True)
+    solicitudes_df = execute_query("SELECT s.id, s.fecha_solicitud, s.tipo, s.ubicacion, m.nombre, m.apellido FROM solicitud s JOIN medico m ON s.medico_id = m.id WHERE s.estado = 'pendiente' ORDER BY s.fecha_solicitud ASC;", conn=conn, is_select=True)
 
     if solicitudes_df.empty:
         st.info("No hay solicitudes pendientes para revisar.")
