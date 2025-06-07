@@ -1,562 +1,336 @@
-# pages/dashboard_hospital.py (pagina 3) - Dashboard para Hospitales
+# pages/dashboard_hospital.py (Versión Completa, Funcional y Corregida)
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 import sys
 import os
+from math import radians, sin, cos, sqrt, atan2
 
-# Ajusta el path para importar 'functions.py' desde el directorio padre
-# Esto asume que 'functions.py' está en el mismo nivel que la carpeta 'pages'
+# --- Configuración de Path y Conexión ---
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from functions import connect_to_supabase, execute_query
 
-# --- Configuración de la página ---
-st.set_page_config(
-    page_title="TissBank - Dashboard Hospital",
-    page_icon="🏥",
-    layout="wide"
+# --- Configuración de la Página ---
+st.set_page_config(page_title="TissBank - Portal Hospitalario", page_icon="🏥", layout="wide")
+
+# --- INYECCIÓN DE CSS PARA ESTÉTICA PROFESIONAL ---
+def load_css():
+    st.markdown("""
+        <style>
+            :root {
+                --primary-color: #0078D4; --background-color: #F8F9FA; --card-background-color: #FFFFFF;
+                --text-color: #212529; --border-color: #DEE2E6; --font-family: 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+            }
+            [data-testid="stAppViewContainer"] > .main { background-color: var(--background-color); }
+            .st-expander {
+                border: 1px solid var(--border-color); box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+                border-radius: 12px; background: var(--card-background-color); margin-bottom: 2rem;
+            }
+            .st-expander header { font-size: 1.2rem; font-weight: 600; color: var(--primary-color); padding: 1rem; }
+            .stButton>button {
+                font-weight: 600; border-radius: 8px; border: 2px solid var(--primary-color);
+                background-color: var(--primary-color); color: white; padding: 0.6rem 1.2rem;
+                transition: all 0.2s ease-in-out;
+            }
+            .stButton>button:hover { background-color: white; color: var(--primary-color); }
+        </style>
+    """, unsafe_allow_html=True)
+
+# --- Funciones de Utilidad y Carga de Datos ---
+def haversine(lat1, lon1, lat2, lon2):
+    R = 6371; dlat = radians(lat2 - lat1); dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2)**2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a)); return R * c
+
+@st.cache_data
+def get_hospitales_principales():
+    data = [
+        {"name": "Hospital Italiano", "address": "Tte. Gral. Juan Domingo Perón 4190, CABA", "lat": -34.6066, "lon": -58.4250},
+        {"name": "Hospital Alemán", "address": "Av. Pueyrredón 1640, CABA", "lat": -34.5938, "lon": -58.4033},
+        {"name": "Hospital Británico", "address": "Perdriel 74, CABA", "lat": -34.6284, "lon": -58.3840},
+        {"name": "Hospital Garrahan", "address": "Pichincha 1890, CABA", "lat": -34.6293, "lon": -58.3908},
+        {"name": "Hospital Fernández", "address": "Av. Cerviño 3356, CABA", "lat": -34.5822, "lon": -58.4111},
+        {"name": "Hospital de Clínicas", "address": "Av. Córdoba 2351, CABA", "lat": -34.5989, "lon": -58.4005},
+        {"name": "Sanatorio Güemes", "address": "Francisco Acuña de Figueroa 1240, CABA", "lat": -34.5983, "lon": -58.4214},
+        {"name": "FLENI", "address": "Montañeses 2325, CABA", "lat": -34.5501, "lon": -58.4485},
+        {"name": "Hospital Austral", "address": "Av. J. D. Perón 1500, Pilar", "lat": -34.4528, "lon": -58.9133},
+        {"name": "Hospital Argerich", "address": "Pi y Margall 750, CABA", "lat": -34.6241, "lon": -58.3662},
+        {"name": "Hospital Rivadavia", "address": "Av. Gral. Las Heras 2670, CABA", "lat": -34.5880, "lon": -58.3990},
+        {"name": "Hospital Durand", "address": "Av. Díaz Vélez 5044, CABA", "lat": -34.6112, "lon": -58.4442},
+        {"name": "Hospital Santojanni", "address": "Pilar 950, CABA", "lat": -34.6465, "lon": -58.5134},
+        {"name": "Sanatorio Finochietto", "address": "Av. Córdoba 2678, CABA", "lat": -34.6043, "lon": -58.4045},
+        {"name": "Fundación Favaloro", "address": "Av. Belgrano 1746, CABA", "lat": -34.6120, "lon": -58.3900}
+    ]
+    return pd.DataFrame(data)
+
+@st.cache_data(ttl=300)
+def get_donantes(_conn):
+    return execute_query("SELECT id, nombre, apellido, dni FROM donante ORDER BY apellido, nombre", conn=_conn, is_select=True)
+
+@st.cache_data(ttl=300)
+def get_medicos(_conn):
+    return execute_query("SELECT id, nombre, apellido, dni FROM medico ORDER BY apellido, nombre", conn=_conn, is_select=True)
+
+@st.cache_data(ttl=300)
+def get_tipos_tejido(_conn):
+    return execute_query("SELECT tipo, descripcion FROM detalles_tejido ORDER BY descripcion", conn=_conn, is_select=True)
+
+# --- INICIO DE LA APLICACIÓN ---
+load_css()
+
+if not st.session_state.get("logged_in") or st.session_state.get("role") != "Hospital":
+    st.warning("No tienes permiso para acceder. Por favor, inicia sesión."); st.stop()
+
+conn = connect_to_supabase()
+if conn is None: st.error("Error fatal de conexión a la base de datos."); st.stop()
+
+hospital_id = int(st.session_state.get("user_id", 0))
+hospital_nombre = st.session_state.get("user_name", "Desconocido")
+
+# --- BARRA LATERAL CON TODAS LAS OPCIONES ---
+st.sidebar.title("Portal Hospitalario")
+st.sidebar.info(f"**{hospital_nombre}**")
+st.sidebar.markdown("---")
+st.sidebar.header("Utilidades")
+opcion_utilidades = st.sidebar.radio(
+    "Seleccione una herramienta:",
+    ["Gestión de Inventario", "Gestión de Solicitudes", "Dashboard Analítico", "Trazabilidad de Tejidos", "Red de Hospitales y Logística"]
 )
 
-# --- Verificar si el usuario está logueado y es Hospital ---
-if "logged_in" not in st.session_state or not st.session_state["logged_in"] or st.session_state["role"] != "Hospital":
-    st.warning("¡No tenés permiso para acceder a esta página! Por favor, iniciá sesión como Hospital.")
-    if st.button("Volver al inicio de sesión"):
-        st.session_state["logged_in"] = False
-        st.switch_page("app.py") # Redirige al app.py principal
-    st.stop() # Detiene la ejecución de la página
+# --- CONTENIDO PRINCIPAL ---
 
-# Obtener datos de sesión del hospital
-hospital_id = st.session_state.get("user_id")
-hospital_nombre = st.session_state.get("user_name")
-hospital_telefono = st.session_state.get("user_identifier")
-
-# --- CORRECCIÓN CLAVE AQUÍ: Convertir hospital_id a int nativo de Python ---
-# Esto es crucial para evitar el error 'numpy.int64'
-if hospital_id is not None:
-    hospital_id = int(hospital_id) # Convertimos el ID a int al principio de la página
-else:
-    st.error("Error: ID de hospital no disponible en la sesión. Por favor, reinicia la sesión.")
-    st.stop() # Detener la ejecución si no hay ID válido
-
-# Recuperar la dirección del hospital usando el ID convertido a int
-conn_hospital_info = connect_to_supabase()
-hospital_direccion = "No disponible" # Default
-if conn_hospital_info:
-    # Usamos el 'hospital_id' ya convertido a int
-    hospital_info_df = execute_query("SELECT direccion FROM hospital WHERE id = %s", conn=conn_hospital_info, params=(hospital_id,), is_select=True)
-    if not hospital_info_df.empty:
-        hospital_direccion = hospital_info_df.iloc[0]['direccion']
-    conn_hospital_info.close()
-else:
-    st.error("No se pudo conectar a la base de datos para obtener la dirección del hospital.")
-
-# --- INICIO DEL CÓDIGO CSS PARA LA ESTÉTICA ---
-# Estas clases de CSS son heurísticas y pueden cambiar con las actualizaciones de Streamlit.
-# 'st-emotion-cache-...' son nombres de clases generados por Streamlit.
-# Podrías necesitar ajustarlos si Streamlit cambia su estructura interna.
-st.markdown("""
-<style>
-/* Estilo para el contenedor general de la barra lateral */
-.st-emotion-cache-1wvypca { /* O el selector que envuelva toda la sidebar */
-    background-color: #e0f2f7; /* Color de fondo claro similar al de la imagen */
-    padding: 20px;
-    border-radius: 10px;
-}
-
-/* Estilo para los botones de la barra lateral (radio buttons) */
-.st-emotion-cache-vk3305 { /* Esto apunta al div que envuelve la etiqueta del radio button */
-    border-radius: 8px; /* Bordes redondeados para las opciones del radio */
-    padding: 10px 15px;
-    margin-bottom: 5px;
-    background-color: #cce7ed; /* Color de fondo un poco más oscuro para las opciones */
-    color: #333; /* Color del texto */
-    font-weight: bold;
-    transition: background-color 0.3s ease;
-}
-.st-emotion-cache-vk3305:hover {
-    background-color: #aaddf4; /* Color al pasar el mouse */
-}
-/* Asegura que el texto dentro de la etiqueta del radio button sea el color correcto */
-.st-emotion-cache-vk3305 div[role="radiogroup"] > label > div {
-    color: #333;
-}
-/* Estilo para el botón de Streamlit, como el de "Volver al inicio de sesión" */
-.st-emotion-cache-z5fcl4 { /* Esto puede apuntar a botones generales */
-    background-color: #6aabcc; /* Un azul/celeste más intenso */
-    color: white;
-    padding: 10px 20px;
-    border-radius: 8px;
-    border: none;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-}
-.st-emotion-cache-z5fcl4:hover {
-    background-color: #5599bb;
-}
-
-/* Para centrar la imagen */
-.st-emotion-cache-1t2w76v { /* Clase para st.image div */
-    display: flex;
-    justify-content: center;
-    align-items: center;
-}
-.st-emotion-cache-1t2w76v img {
-    margin: 0 auto; /* Asegura que la imagen misma esté centrada si no lo hace el flex */
-}
-
-</style>
-""", unsafe_allow_html=True)
-# --- FIN DEL CÓDIGO CSS PARA LA ESTÉTICA ---
-
-st.title(f"Bienvenido, Hospital {hospital_nombre}.")
-st.markdown(f"**Teléfono:** {hospital_telefono} | **Dirección:** {hospital_direccion}")
-st.markdown("---")
-
-# Barra lateral para navegación interna del dashboard
-st.sidebar.title("Menú Hospital")
-# Inicializar la selección del menú del dashboard en la sesión de esta página
-if "hospital_menu_selection" not in st.session_state:
-    st.session_state["hospital_menu_selection"] = "Bienvenida"
-
-st.session_state["hospital_menu_selection"] = st.sidebar.radio(
-    "Navegación",
-    ["Bienvenida", "Tu Inventario", "Hospitales Afiliados", "Historial de Tejidos", "Solicitudes", "Donantes"],
-    key="hospital_dashboard_menu" # Clave única para esta página
-)
-
-# Contenido principal basado en la selección del menú del dashboard
-if st.session_state["hospital_menu_selection"] == "Bienvenida":
-    # Logo en la parte superior del contenido principal, ahora más grande y centrado
-    st.image("images/logo.png", width=300) # Aumentado el ancho para que sea más grande
-
-    st.header("Bienvenido al Dashboard de Hospital")
-    st.write(f"""
-    Aquí podrás acceder a toda la información relevante para la gestión de tejidos.
-    Desde esta ventana podrás:
-    * **Consultar el inventario actual** de tejidos disponibles en el banco (que gestiona tu hospital).
-    * **Visualizar un mapa** con todos los hospitales afiliados.
-    * **Revisar el historial** de tejidos registrados en el banco (o los que gestiona tu hospital).
-    * **Ver y gestionar solicitudes** activas de tejidos.
-    * **Registrar y consultar donantes.**
-    """)
-    st.info("Explora las opciones en la barra lateral para empezar a gestionar tus tejidos.")
-
-elif st.session_state["hospital_menu_selection"] == "Tu Inventario":
-    st.header("📦 Tu Inventario de Tejidos")
-    st.write("Aquí se mostrará el inventario actual de tejidos que pertenecen a tu hospital.")
-
-    st.subheader("Inventario Actual de Tejidos")
-    query_inventory = """
-    SELECT 
-        t.id AS "ID Tejido", 
-        dt.descripcion AS "Tipo de Tejido", 
-        t.tipo AS "Código Tipo", 
-        t.fecha_recoleccion AS "Fecha Recolección", 
-        t.estado AS "Estado Actual", 
-        t.fecha_de_estado AS "Fecha Último Estado",
-        d.nombre AS "Nombre Donante",
-        d.apellido AS "Apellido Donante",
-        m.nombre AS "Nombre Médico Recolector",
-        m.apellido AS "Apellido Médico Recolector"
-    FROM tejidos AS t
-    JOIN detalles_tejido AS dt ON t.tipo = dt.tipo
-    LEFT JOIN donante AS d ON t.id_donante = d.id
-    LEFT JOIN medico AS m ON t.id_medico = m.id
-    WHERE t.id_hospital = %s
-    ORDER BY t.fecha_recoleccion DESC;
-    """
+if opcion_utilidades == "Gestión de Inventario":
+    st.title("📦 Gestión de Inventario")
+    st.markdown("Registre nuevas unidades y actualice el estado del stock.")
+    st.markdown("---")
     
-    conn = connect_to_supabase()
-    if conn:
-        inventory_df = execute_query(query_inventory, conn=conn, params=(hospital_id,), is_select=True)
-        conn.close()
-    else:
-        inventory_df = pd.DataFrame()
-        st.error("No se pudo conectar a la base de datos para el inventario.")
-
-    if not inventory_df.empty:
-        st.dataframe(inventory_df, use_container_width=True)
-    else:
-        st.info("No hay tejidos registrados en el inventario de tu hospital.")
-    
-    st.subheader("Gestionar Tejidos (Recepción/Cambio de Estado)")
-    
-    with st.expander("➕ Registrar Nuevo Tejido Recibido"):
-        with st.form("form_add_tejido"):
-            # --- LÓGICA DE CARGA DE TIPOS DE TEJIDO (Mantenemos la robustez) ---
-            default_tejido_types = pd.DataFrame([
-                {'tipo': 'CORNEA', 'descripcion': 'Córnea Ocular'},
-                {'tipo': 'PIEL', 'descripcion': 'Tejido Cutáneo'},
-                {'tipo': 'HUESO_LARGO', 'descripcion': 'Hueso Largo'},
-                {'tipo': 'HUESO_CORTO', 'descripcion': 'Hueso Corto'},
-                {'tipo': 'VALVULA_CARD', 'descripcion': 'Válvula Cardíaca'},
-                {'tipo': 'VA_SANGUINEO', 'descripcion': 'Vaso Sanguíneo'},
-                {'tipo': 'MENISCO', 'descripcion': 'Menisco'},
-                {'tipo': 'TENDON', 'descripcion': 'Tendón'},
-                {'tipo': 'CARTILAGO', 'descripcion': 'Cartílago Articular'},
-                {'tipo': 'MO', 'descripcion': 'Médula Ósea'},
-                {'tipo': 'CEL_MADRE', 'descripcion': 'Células Madre'},
-                {'tipo': 'LIGAMENTO', 'descripcion': 'Ligamento'},
-                {'tipo': 'MEMBRANA', 'descripcion': 'Membrana Amniótica'},
-                {'tipo': 'PANCREAS', 'descripcion': 'Páncreas'},
-                {'tipo': 'HIGADO', 'descripcion': 'Hígado'},
-                {'tipo': 'RINON', 'descripcion': 'Riñón'},
-                {'tipo': 'PULMON', 'descripcion': 'Pulmón'},
-                {'tipo': 'CORAZON', 'descripcion': 'Corazón'},
-                {'tipo': 'INTESTINO', 'descripcion': 'Intestino'},
-                {'tipo': 'ESTOMAGO', 'descripcion': 'Estómago'},
-                {'tipo': 'BAZO', 'descripcion': 'Bazo'},
-                {'tipo': 'OVARIO', 'descripcion': 'Ovario'},
-                {'tipo': 'TESTICULO', 'descripcion': 'Testículo'},
-                {'tipo': 'GLANDULA', 'descripcion': 'Glándula (ej. tiroides)'},
-                {'tipo': 'NERVIO', 'descripcion': 'Nervio'}
-            ])
-
-            types_df = pd.DataFrame() 
-
-            try:
-                conn_types = connect_to_supabase()
-                if conn_types:
-                    db_types_df = execute_query("SELECT tipo, descripcion FROM detalles_tejido ORDER BY descripcion", conn=conn_types, is_select=True)
-                    conn_types.close()
-                    
-                    if not db_types_df.empty:
-                        types_df = db_types_df
-                        st.info("Tipos de tejido cargados desde la base de datos.")
-                    else:
-                        st.warning("La tabla 'detalles_tejido' de la base de datos está vacía o no se encontraron datos. Usando lista predeterminada de respaldo.")
-                        types_df = default_tejido_types
+    with st.expander("➕ **Registrar Nuevo Tejido**", expanded=False):
+        if "tipo_donante" not in st.session_state: st.session_state.tipo_donante = "Nuevo Donante"
+        st.radio("Paso 1: Tipo de donante", ["Nuevo Donante", "Donante Existente"], key="tipo_donante", horizontal=True)
+        with st.form("form_registro_final"):
+            if st.session_state.tipo_donante == "Donante Existente":
+                st.subheader("Seleccionar Donante")
+                donantes_df = get_donantes(conn)
+                if not donantes_df.empty:
+                    opciones_donante = [f"{row['apellido']}, {row['nombre']} (DNI: {row['dni']})" for _, row in donantes_df.iterrows()]
+                    donante_sel = st.selectbox("Donante", opciones_donante, index=None, placeholder="Elige un donante existente...")
+            else:
+                st.subheader("Datos del Nuevo Donante")
+                c1, c2 = st.columns(2); nombre_donante = c1.text_input("Nombre(s)"); apellido_donante = c2.text_input("Apellido(s)")
+                c3, c4 = st.columns(2); dni_donante = c3.text_input("DNI (solo números)"); sexo_donante = c4.selectbox("Sexo", ["Masculino", "Femenino"])
+            st.markdown("---")
+            st.subheader("Paso 2: Datos de Recolección")
+            medicos_df = get_medicos(conn)
+            if not medicos_df.empty:
+                opciones_medico = [f"{row['apellido']}, {row['nombre']} (DNI: {row['dni']})" for _, row in medicos_df.iterrows()]
+                medico_sel = st.selectbox("Médico Recolector", opciones_medico, index=None, placeholder="Elige un médico...")
+            else:
+                st.error("No hay médicos registrados."); medico_sel = None
+            tipos_tejido_df = get_tipos_tejido(conn)
+            if not tipos_tejido_df.empty:
+                opciones_tejido = [f"{row['descripcion']} ({row['tipo']})" for _, row in tipos_tejido_df.iterrows()]
+                tejido_sel = st.selectbox("Tipo de Tejido", opciones_tejido, index=None, placeholder="Elige un tipo de tejido...")
+            else:
+                st.error("No se encontraron tipos de tejido."); tejido_sel = None
+            c5, c6 = st.columns(2)
+            fecha_recoleccion = c5.date_input("Fecha de Recolección", datetime.now().date())
+            estado_inicial = c6.selectbox("Estado Inicial", ['Disponible', 'En Cuarentena'])
+            condicion_recoleccion = st.text_area("Condición de Recolección", placeholder="Ej: óptima, sin patologías...")
+            submitted = st.form_submit_button("Registrar Tejido", use_container_width=True)
+            if submitted:
+                # Lógica de registro completa y funcional
+                id_donante_final = None
+                if st.session_state.tipo_donante == "Nuevo Donante":
+                    if all([nombre_donante, apellido_donante, dni_donante]):
+                        try:
+                            dni_int = int(dni_donante)
+                            insert_query = "INSERT INTO donante (nombre, apellido, dni, sexo) VALUES (%s, %s, %s, %s) RETURNING id"
+                            new_id_df = execute_query(insert_query, conn, (nombre_donante, apellido_donante, dni_int, sexo_donante), is_select=True)
+                            if new_id_df is not None and not new_id_df.empty:
+                                id_donante_final = int(new_id_df.iloc[0]['id'])
+                        except Exception as e: st.error(f"Error al registrar donante: {e}")
+                    else: st.error("Faltan datos del nuevo donante.")
                 else:
-                    st.error("No se pudo establecer conexión con la base de datos para obtener tipos de tejido. Usando lista predeterminada de respaldo.")
-                    types_df = default_tejido_types
-            except Exception as e:
-                st.error(f"Error al cargar tipos de tejido desde la base de datos: {e}. Usando lista predeterminada de respaldo.")
-                types_df = default_tejido_types
-
-            if 'tipo' not in types_df.columns or 'descripcion' not in types_df.columns:
-                types_df = default_tejido_types
-
-            tejido_tipo_options = types_df.apply(lambda row: f"{row['descripcion']} ({row['tipo']})", axis=1).tolist()
-            selected_tejido_display = st.selectbox("Tipo de Tejido", ["Seleccione un tipo"] + tejido_tipo_options)
+                    if 'donante_sel' in locals() and donante_sel:
+                        dni_sel_val = int(donante_sel.split("DNI: ")[1][:-1])
+                        id_donante_final = int(donantes_df[donantes_df['dni'] == dni_sel_val].iloc[0]['id'])
             
-            selected_tejido_code = None
-            if selected_tejido_display and selected_tejido_display != "Seleccione un tipo":
-                selected_tejido_code = selected_tejido_display.split('(')[-1][:-1]
+                id_medico_final = None
+                if medico_sel:
+                    dni_medico_sel_val = int(medico_sel.split("DNI: ")[1][:-1])
+                    id_medico_final = int(medicos_df[medicos_df['dni'] == dni_medico_sel_val].iloc[0]['id'])
 
-            # --- ID DONANTE AUTOMÁTICO ---
-            # Define el ID del donante por defecto. ¡ASEGÚRATE DE QUE ESTE ID EXISTA EN TU TABLA 'donante' EN SUPABASE!
-            # Por ejemplo, puedes crear un donante con ID 1 y nombre "Donante Genérico".
-            id_donante_auto = 1 # <--- ¡CAMBIA ESTO AL ID DE TU DONANTE POR DEFECTO/GENÉRICO EN SUPABASE!
-            st.info(f"El ID del donante se asignará automáticamente a: **{id_donante_auto}** (Donante Genérico/Por Defecto).")
-            
-            # --- ID MÉDICO AUTOMÁTICO ---
-            # Define el ID del médico por defecto. ¡ASEGÚRATE DE QUE ESTE ID EXISTA EN TU TABLA 'medico' EN SUPABASE!
-            # Por ejemplo, puedes crear un médico con ID 1 y nombre "Dr. Banco Tejidos".
-            id_medico_auto = 1 # <--- ¡CAMBIA ESTO AL ID DE TU MÉDICO POR DEFECTO/GENÉRICO EN SUPABASE!
-            st.info(f"El ID del médico recolector se asignará automáticamente a: **{id_medico_auto}** (Médico por Defecto).")
-            
-            fecha_recoleccion = st.date_input("Fecha de Recolección", datetime.now().date())
-            condicion_recoleccion = st.text_area("Condición de Recolección (ej. 'óptima', 'no apto para trasplante')", height=70)
-            estado_inicial = st.selectbox("Estado Inicial", ["Disponible", "En Cuarentena", "Rechazado", "En Proceso"])
-            
-            submit_add_tejido = st.form_submit_button("Registrar Tejido")
-
-            if submit_add_tejido:
-                if selected_tejido_code is None:
-                    st.warning("Por favor, seleccioná un tipo de tejido.")
-                elif not condicion_recoleccion:
-                    st.warning("Por favor, ingresa la condición de recolección.")
+                if id_donante_final and id_medico_final and tejido_sel:
+                    tejido_code = tejido_sel.split('(')[-1][:-1]
+                    query = "INSERT INTO tejidos (tipo, id_donante, id_medico, id_hospital, fecha_recoleccion, condicion_recoleccion, estado, fecha_de_estado) VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())"
+                    params = (tejido_code, id_donante_final, id_medico_final, hospital_id, fecha_recoleccion, condicion_recoleccion, estado_inicial)
+                    if execute_query(query, conn, params, is_select=False):
+                        st.success("✅ ¡Tejido registrado exitosamente!")
+                        st.cache_data.clear(); st.rerun()
                 else:
-                    try:
-                        conn_add = connect_to_supabase()
-                        if conn_add:
-                            query_add_tejido = """
-                            INSERT INTO tejidos (tipo, id_donante, id_medico, id_hospital, fecha_recoleccion, condicion_recoleccion, estado, fecha_de_estado)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                            """
-                            params_add_tejido = (
-                                selected_tejido_code,
-                                id_donante_auto, # Usamos el ID del donante automático
-                                id_medico_auto,  # Usamos el ID del médico automático
-                                hospital_id, # Usamos el hospital_id ya convertido a int
-                                fecha_recoleccion,
-                                condicion_recoleccion,
-                                estado_inicial,
-                                datetime.now().date()
-                            )
-                            if execute_query(query_add_tejido, conn=conn_add, params=params_add_tejido, is_select=False):
-                                st.success("✅ Tejido registrado correctamente.")
-                                st.rerun()
-                            else:
-                                st.error("❌ Error al registrar el tejido.")
-                            conn_add.close()
-                        else:
-                            st.error("No se pudo conectar a la base de datos.")
-                    except Exception as e:
-                        st.error(f"Ocurrió un error inesperado al registrar el tejido: {e}")
+                    if not id_donante_final: st.error("Error de validación: El donante no fue definido.")
+                    if not id_medico_final: st.error("Error de validación: El médico no fue seleccionado.")
+                    if not tejido_sel: st.error("Error de validación: El tipo de tejido no fue seleccionado.")
 
-    with st.expander("🔄 Actualizar Estado de Tejido Existente"):
-        with st.form("form_update_tejido_estado"):
-            tejido_id_to_update = st.number_input("ID del Tejido a Actualizar", min_value=1, format="%d")
-            new_estado = st.selectbox("Nuevo Estado", ["Disponible", "En Cuarentena", "Rechazado", "En Proceso", "Enviado", "Consumido"])
-            
-            submit_update_tejido = st.form_submit_button("Actualizar Estado")
-
-            if submit_update_tejido:
-                if not tejido_id_to_update:
-                    st.warning("Por favor, ingresá el ID del tejido.")
-                else:
-                    try:
-                        conn_update = connect_to_supabase()
-                        if conn_update:
-                            check_ownership_query = "SELECT id FROM tejidos WHERE id = %s AND id_hospital = %s"
-                            owner_check = execute_query(check_ownership_query, conn=conn_update, params=(tejido_id_to_update, hospital_id), is_select=True) # Usamos hospital_id ya convertido
-
-                            if owner_check.empty:
-                                st.error("No tenés permiso para modificar este tejido o el ID no existe en tu inventario.")
-                            else:
-                                query_update_tejido = """
-                                UPDATE tejidos
-                                SET estado = %s, fecha_de_estado = %s
-                                WHERE id = %s AND id_hospital = %s
-                                """
-                                params_update_tejido = (new_estado, datetime.now().date(), tejido_id_to_update, hospital_id) # Usamos hospital_id ya convertido
-                                if execute_query(query_update_tejido, conn=conn_update, params=params_update_tejido, is_select=False):
-                                    st.success(f"✅ Estado del tejido {tejido_id_to_update} actualizado a '{new_estado}'.")
-                                    st.rerun()
-                                else:
-                                    st.error(f"❌ Error al actualizar el estado del tejido {tejido_id_to_update}.")
-                                conn_update.close()
-                        else:
-                            st.error("No se pudo conectar a la base de datos.")
-                    except Exception as e:
-                        st.error(f"Ocurrió un error inesperado al actualizar el tejido: {e}")
-
-elif st.session_state["hospital_menu_selection"] == "Hospitales Afiliados":
-    st.header("🏥 Hospitales Afiliados")
-    st.write("Aquí podrás ver una lista de todos los hospitales afiliados a la red y su ubicación.")
-    
-    st.subheader("Mapa de Hospitales (Placeholder)")
-    st.markdown("![Mapa de Hospitales](https://via.placeholder.com/600x400?text=Mapa+de+Hospitales)")
-    st.write("_(Se integraría un mapa interactivo aquí usando la columna 'direccion' de la tabla hospital)_")
-
-    st.subheader("Lista de Hospitales")
-    conn = connect_to_supabase()
-    if conn:
-        query_all_hospitals = "SELECT nombre, direccion, telefono FROM hospital ORDER BY nombre"
-        all_hospitals_df = execute_query(query_all_hospitals, conn=conn, is_select=True)
-        conn.close()
-    else:
-        all_hospitals_df = pd.DataFrame()
-        st.error("No se pudo conectar a la base de datos para obtener la lista de hospitales.")
-
-    if not all_hospitals_df.empty:
-        st.dataframe(all_hospitals_df, use_container_width=True)
-    else:
-        st.info("No se encontraron hospitales afiliados.")
-
-elif st.session_state["hospital_menu_selection"] == "Historial de Tejidos":
-    st.header("⏳ Historial de Tejidos")
-    st.write("Aquí se muestra el registro de todos los tejidos y sus cambios de estado en la plataforma.")
-    
-    st.subheader("Filtrar Historial")
-    col_date1, col_date2 = st.columns(2)
-    with col_date1:
-        start_date = st.date_input("Fecha Inicio", datetime(datetime.now().year, 1, 1).date())
-    with col_date2:
-        end_date = st.date_input("Fecha Fin", datetime.now().date())
-    
-    filter_by_hospital_hist = st.checkbox("Filtrar solo por tejidos de mi hospital")
-
-    conn = connect_to_supabase()
-    if conn:
-        query_history_base = """
-        SELECT 
-            t.id AS "ID Tejido", 
-            dt.descripcion AS "Tipo de Tejido", 
-            t.estado AS "Estado", 
-            t.fecha_de_estado AS "Fecha del Estado",
-            t.fecha_recoleccion AS "Fecha Recolección",
-            h.nombre AS "Hospital Propietario",
-            m.nombre AS "Médico Recolector",
-            d.nombre AS "Donante"
-        FROM tejidos AS t
-        JOIN detalles_tejido AS dt ON t.tipo = dt.tipo
-        LEFT JOIN hospital AS h ON t.id_hospital = h.id
-        LEFT JOIN medico AS m ON t.id_medico = m.id
-        LEFT JOIN donante AS d ON t.id_donante = d.id
-        WHERE t.fecha_de_estado BETWEEN %s AND %s
-        """
-        params_history = [start_date, end_date]
-
-        if filter_by_hospital_hist:
-            query_history_base += " AND t.id_hospital = %s"
-            params_history.append(hospital_id) # Usamos hospital_id ya convertido
+    with st.expander("🔄 **Actualizar Estado de Tejido Existente**"):
+        query_inventory_update = "SELECT t.id, dt.descripcion, t.estado, t.fecha_recoleccion, d.nombre || ' ' || d.apellido as donante FROM tejidos t LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo LEFT JOIN donante d ON t.id_donante = d.id WHERE t.id_hospital = %s ORDER BY t.id DESC"
+        inventory_df_update = execute_query(query_inventory_update, conn=conn, params=(hospital_id,), is_select=True)
         
-        query_history_base += " ORDER BY t.fecha_de_estado DESC;"
-        
-        history_df = execute_query(query_history_base, conn=conn, params=tuple(params_history), is_select=True)
-        conn.close()
-    else:
-        history_df = pd.DataFrame()
-        st.error("No se pudo conectar a la base de datos para el historial.")
+        if not inventory_df_update.empty:
+            with st.form("form_update_estado_final"):
+                opciones_tejido = [f"ID: {row['id']} - {row['descripcion']} (Donante: {row['donante']}, Rec: {row['fecha_recoleccion']})" for _, row in inventory_df_update.iterrows()]
+                tejido_sel_update = st.selectbox("Tejido a actualizar", opciones_tejido)
+                estados_validos = ['Disponible', 'En Cuarentena', 'Reservado', 'Enviado', 'Rechazado']
+                new_estado = st.selectbox("Nuevo Estado", estados_validos)
+                submitted_update = st.form_submit_button("Actualizar Estado", use_container_width=True)
 
-    if st.button("Buscar Historial"):
-        if not history_df.empty:
-            st.dataframe(history_df, use_container_width=True)
+                if submitted_update:
+                    id_to_update = int(tejido_sel_update.split(' ')[1])
+                    query_update = "UPDATE tejidos SET estado = %s, fecha_de_estado = NOW() WHERE id = %s"
+                    if execute_query(query_update, conn, (new_estado, id_to_update), is_select=False):
+                        st.success(f"✅ Estado del tejido ID {id_to_update} actualizado a '{new_estado}'.")
+                        st.cache_data.clear(); st.rerun()
         else:
-            st.info("No se encontró historial para las fechas seleccionadas y filtros aplicados.")
+            st.info("No hay tejidos en tu inventario para actualizar.")
 
-elif st.session_state["hospital_menu_selection"] == "Solicitudes":
-    st.header("📝 Solicitudes de Tejidos")
-    st.write("Gestiona tus solicitudes de tejidos: realiza nuevas, revisa el estado de las existentes y visualiza las aprobadas.")
+    st.markdown("---")
+    st.subheader("Inventario Actual")
+    inventory_df_final = execute_query(f"SELECT t.id, dt.descripcion, t.estado, t.fecha_recoleccion, d.nombre || ' ' || d.apellido as donante FROM tejidos t LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo LEFT JOIN donante d ON t.id_donante = d.id WHERE t.id_hospital = {hospital_id} ORDER BY t.id DESC", conn, is_select=True)
+    st.dataframe(inventory_df_final, use_container_width=True, hide_index=True)
+
+
+elif opcion_utilidades == "Gestión de Solicitudes":
+    st.title("📬 Gestión de Solicitudes de Médicos")
+    st.markdown("Revise y procese las solicitudes de tejido pendientes.")
     
-    st.warning("⚠️ **ATENCIÓN:** La tabla `solicitudes` no se encuentra en tu diagrama de base de datos. Las funcionalidades a continuación son simuladas o requerirán que crees esta tabla en Supabase.")
+    query = """
+        SELECT s.id, s.fecha_solicitud, s.tipo, s.ubicacion, m.nombre, m.apellido 
+        FROM solicitud s JOIN medico m ON s.medico_id = m.id WHERE s.estado = 'pendiente' ORDER BY s.fecha_solicitud ASC;
+    """
+    solicitudes_df = execute_query(query, conn=conn, is_select=True)
 
-    st.subheader("Mis Solicitudes Activas (Simulado)")
-    requests_data = {
-        'ID Solicitud': ['SOL001', 'SOL002', 'SOL003'],
-        'Tipo Tejido Solicitado': ['Córnea', 'Piel', 'Hueso'],
-        'Cantidad': [2, 5, 1],
-        'Fecha Solicitud': ['2024-04-10', '2024-05-01', '2024-05-20'],
-        'Fecha Necesaria': ['2024-06-01', '2024-05-25', '2024-06-15'],
-        'Estado': ['Pendiente', 'Aprobada', 'Pendiente']
-    }
-    active_requests_df = pd.DataFrame(requests_data)
-    st.dataframe(active_requests_df, use_container_width=True)
-
-    st.subheader("Crear Nueva Solicitud (Simulado)")
-    with st.expander("Haz clic para crear una nueva solicitud"):
-        with st.form("form_nueva_solicitud_sim"):
-            # --- LÓGICA DE CARGA DE TIPOS DE TEJIDO PARA SOLICITUDES ---
-            default_tejido_types_req = pd.DataFrame([
-                {'tipo': 'CORNEA', 'descripcion': 'Córnea Ocular'},
-                {'tipo': 'PIEL', 'descripcion': 'Tejido Cutáneo'},
-                {'tipo': 'HUESO_LARGO', 'descripcion': 'Hueso Largo'},
-                {'tipo': 'HUESO_CORTO', 'descripcion': 'Hueso Corto'},
-                {'tipo': 'VALVULA_CARD', 'descripcion': 'Válvula Cardíaca'},
-                {'tipo': 'VA_SANGUINEO', 'descripcion': 'Vaso Sanguíneo'},
-                {'tipo': 'MENISCO', 'descripcion': 'Menisco'},
-                {'tipo': 'TENDON', 'descripcion': 'Tendón'},
-                {'tipo': 'CARTILAGO', 'descripcion': 'Cartílago Articular'},
-                {'tipo': 'MO', 'descripcion': 'Médula Ósea'},
-                {'tipo': 'CEL_MADRE', 'descripcion': 'Células Madre'},
-                {'tipo': 'LIGAMENTO', 'descripcion': 'Ligamento'},
-                {'tipo': 'MEMBRANA', 'descripcion': 'Membrana Amniótica'},
-                {'tipo': 'PANCREAS', 'descripcion': 'Páncreas'},
-                {'tipo': 'HIGADO', 'descripcion': 'Hígado'},
-                {'tipo': 'RINON', 'descripcion': 'Riñón'},
-                {'tipo': 'PULMON', 'descripcion': 'Pulmón'},
-                {'tipo': 'CORAZON', 'descripcion': 'Corazón'},
-                {'tipo': 'INTESTINO', 'descripcion': 'Intestino'},
-                {'tipo': 'ESTOMAGO', 'descripcion': 'Estómago'},
-                {'tipo': 'BAZO', 'descripcion': 'Bazo'},
-                {'tipo': 'OVARIO', 'descripcion': 'Ovario'},
-                {'tipo': 'TESTICULO', 'descripcion': 'Testículo'},
-                {'tipo': 'GLANDULA', 'descripcion': 'Glándula (ej. tiroides)'},
-                {'tipo': 'NERVIO', 'descripcion': 'Nervio'}
-            ])
-            
-            types_df_req = pd.DataFrame()
-
-            try:
-                conn_types_req = connect_to_supabase()
-                if conn_types_req:
-                    db_types_df_req = execute_query("SELECT tipo, descripcion FROM detalles_tejido ORDER BY descripcion", conn=conn_types_req, is_select=True)
-                    conn_types_req.close()
-                    
-                    if not db_types_df_req.empty:
-                        types_df_req = db_types_df_req
+    if solicitudes_df.empty:
+        st.info("No hay solicitudes pendientes para revisar.")
+    else:
+        st.subheader(f"Solicitudes Pendientes: {len(solicitudes_df)}")
+        st.markdown("---")
+        for _, row in solicitudes_df.iterrows():
+            with st.container(border=True):
+                st.markdown(f"**ID:** {row['id']} | **Fecha:** {row['fecha_solicitud'].strftime('%d/%m/%Y')} | **Médico:** {row['nombre']} {row['apellido']}")
+                st.markdown(f"**Tejido Solicitado:** {row['tipo']} ({row['ubicacion']})")
+                c1, c2, _ = st.columns([1, 1, 8])
+                if c1.button("✅ Aprobar", key=f"approve_{row['id']}"):
+                    tejido_disponible_q = "SELECT id FROM tejidos WHERE tipo = %s AND estado = 'Disponible' AND id_hospital = %s LIMIT 1"
+                    tejido_disp_df = execute_query(tejido_disponible_q, conn, (row['tipo'], hospital_id), is_select=True)
+                    if not tejido_disp_df.empty:
+                        id_tejido_a_reservar = tejido_disp_df.iloc[0]['id']
+                        update_tejido_q = "UPDATE tejidos SET estado = 'Reservado' WHERE id = %s"
+                        execute_query(update_tejido_q, conn, (id_tejido_a_reservar,), is_select=False)
+                        update_solicitud_q = "UPDATE solicitud SET estado = 'aprobada' WHERE id = %s"
+                        execute_query(update_solicitud_q, conn, (row['id'],), is_select=False)
+                        st.success(f"Solicitud {row['id']} aprobada. Tejido ID {id_tejido_a_reservar} ha sido reservado.")
+                        st.rerun()
                     else:
-                        st.warning("La tabla 'detalles_tejido' para solicitudes está vacía. Usando lista predeterminada de respaldo.")
-                        types_df_req = default_tejido_types_req
-                else:
-                    st.error("No se pudo establecer conexión con la base de datos para tipos de tejido de solicitud. Usando lista predeterminada de respaldo.")
-                    types_df_req = default_tejido_types_req
-            except Exception as e:
-                st.error(f"Error al cargar tipos de tejido para solicitud: {e}. Usando lista predeterminada de respaldo.")
-                types_df_req = default_tejido_types_req
+                        st.warning(f"No hay tejidos de tipo '{row['tipo']}' disponibles para aprobar esta solicitud.")
+                
+                if c2.button("❌ Rechazar", key=f"reject_{row['id']}"):
+                    update_solicitud_q = "UPDATE solicitud SET estado = 'rechazada' WHERE id = %s"
+                    execute_query(update_solicitud_q, conn, (row['id'],), is_select=False)
+                    st.success(f"Solicitud {row['id']} rechazada.")
+                    st.rerun()
 
-            if 'tipo' not in types_df_req.columns or 'descripcion' not in types_df_req.columns:
-                types_df_req = default_tejido_types_req
-
-            tejido_tipo_options_req = types_df_req.apply(lambda row: f"{row['descripcion']} ({row['tipo']})", axis=1).tolist()
-            selected_tejido_display_req = st.selectbox("Tipo de Tejido Solicitado", ["Seleccione un tipo"] + tejido_tipo_options_req)
-            
-            selected_tejido_code_req = None
-            if selected_tejido_display_req and selected_tejido_display_req != "Seleccione un tipo":
-                selected_tejido_code_req = selected_tejido_display_req.split('(')[-1][:-1]
-
-            cantidad = st.number_input("Cantidad Solicitada", min_value=1, value=1)
-            fecha_necesidad = st.date_input("Fecha Necesaria (aproximada)", datetime.now().date())
-            
-            submit_request = st.form_submit_button("Enviar Solicitud")
-            
-            if submit_request:
-                if selected_tejido_code_req is None:
-                    st.warning("Por favor, seleccioná un tipo de tejido.")
-                else:
-                    st.success(f"✔️ Solicitud de {cantidad} de {selected_tejido_code_req} para {fecha_necesidad} enviada (simulado).")
-                    st.info("Recordá que necesitas crear la tabla `solicitudes` en tu base de datos para que esta funcionalidad sea real.")
-
-elif st.session_state["hospital_menu_selection"] == "Donantes":
-    st.header("👤 Gestión de Donantes")
-    st.write("Aquí podrás registrar nuevos donantes y consultar la información de donantes existentes.")
-
-    st.subheader("Lista de Donantes")
-    conn = connect_to_supabase()
-    if conn:
-        query_donantes = "SELECT id, nombre, apellido, dni, sexo FROM donante ORDER BY apellido, nombre"
-        donantes_df = execute_query(query_donantes, conn=conn, is_select=True)
-        conn.close()
+elif opcion_utilidades == "Dashboard Analítico":
+    st.title("📊 Dashboard Analítico")
+    st.markdown("Métricas y visualizaciones clave sobre la operación.")
+    
+    tejidos_df = execute_query(f"SELECT estado, tipo FROM tejidos WHERE id_hospital = {hospital_id}", conn, is_select=True)
+    if not tejidos_df.empty:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Total de Tejidos en Stock", len(tejidos_df))
+        c2.metric("Disponibles", len(tejidos_df[tejidos_df['estado'] == 'Disponible']))
+        c3.metric("En Cuarentena", len(tejidos_df[tejidos_df['estado'] == 'En Cuarentena']))
+        
+        st.markdown("---")
+        st.subheader("Composición del Inventario")
+        composicion_df = tejidos_df['tipo'].value_counts().reset_index()
+        composicion_df.columns = ['Tipo de Tejido', 'Cantidad']
+        st.bar_chart(composicion_df.set_index('Tipo de Tejido'))
     else:
-        donantes_df = pd.DataFrame()
-        st.error("No se pudo conectar a la base de datos para obtener los donantes.")
+        st.info("No hay datos de inventario para generar estadísticas.")
 
-    if not donantes_df.empty:
-        st.dataframe(donantes_df, use_container_width=True)
-    else:
-        st.info("No hay donantes registrados.")
+elif opcion_utilidades == "Trazabilidad de Tejidos":
+    st.title("🧬 Trazabilidad de Tejidos")
+    st.markdown("Busque un tejido por su ID para ver su historial completo.")
+    
+    tejido_id_busqueda = st.text_input("Ingrese el ID del tejido a rastrear:")
+    if st.button("Buscar Tejido", type="primary"):
+        if tejido_id_busqueda.isdigit():
+            query = """
+                SELECT t.*, dt.descripcion, d.nombre as d_nombre, d.apellido as d_apellido, 
+                       m.nombre as m_nombre, m.apellido as m_apellido, h.nombre as h_nombre
+                FROM tejidos t
+                LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo
+                LEFT JOIN donante d ON t.id_donante = d.id
+                LEFT JOIN medico m ON t.id_medico = m.id
+                LEFT JOIN hospital h ON t.id_hospital = h.id
+                WHERE t.id = %s
+            """
+            trace_df = execute_query(query, conn, (int(tejido_id_busqueda),), is_select=True)
+            if not trace_df.empty:
+                data = trace_df.iloc[0]
+                st.success(f"Información encontrada para el Tejido ID: {data['id']}")
+                st.subheader(f"Detalles del Tejido: {data['descripcion']}")
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Estado Actual", data['estado'])
+                c2.metric("Fecha Recolección", data['fecha_recoleccion'].strftime('%d/%m/%Y'))
+                c3.metric("Última Actualización", data['fecha_de_estado'].strftime('%d/%m/%Y'))
+                st.text_area("Condición de Recolección", data['condicion_recoleccion'], height=100, disabled=True)
+                st.markdown("---")
+                st.subheader("Información de Origen")
+                st.markdown(f"**Donante:** {data['d_nombre']} {data['d_apellido']}")
+                st.markdown(f"**Médico Recolector:** {data['m_nombre']} {data['m_apellido']}")
+                st.markdown(f"**Hospital de Registro:** {data['h_nombre']}")
+            else:
+                st.error("No se encontró ningún tejido con ese ID.")
+        else:
+            st.warning("Por favor, ingrese un ID numérico válido.")
 
-    st.subheader("Registrar Nuevo Donante")
-    with st.expander("➕ Haz clic para registrar un nuevo donante"):
-        with st.form("form_add_donante"):
-            nombre_donante = st.text_input("Nombre del Donante")
-            apellido_donante = st.text_input("Apellido del Donante")
-            dni_donante = st.text_input("DNI del Donante (Solo números)", max_chars=10)
-            sexo_donante = st.selectbox("Sexo", ["Masculino", "Femenino", "Otro", "No Especificado"])
+elif opcion_utilidades == "Red de Hospitales y Logística":
+    st.title("🌐 Red de Hospitales y Logística")
+    st.markdown("Visualice la red y calcule tiempos de traslado estimados.")
+    st.markdown("---")
+    
+    hospitales_df = get_hospitales_principales()
+    st.subheader("Ubicación de Hospitales en la Red")
+    st.map(hospitales_df, latitude='lat', longitude='lon', zoom=10)
+    
+    with st.expander("Ver lista de hospitales y direcciones"):
+        st.dataframe(hospitales_df[['name', 'address']].rename(columns={'name': 'Hospital', 'address': 'Dirección'}), use_container_width=True)
+    
+    st.markdown("---")
+    st.subheader("Calculadora de Tiempo de Traslado Estimado")
+    
+    col1, col2 = st.columns(2)
+    origen = col1.selectbox("📍 Hospital de Origen", options=hospitales_df['name'], index=0)
+    destino = col2.selectbox("🏁 Hospital de Destino", options=hospitales_df['name'], index=1)
+        
+    if st.button("Calcular Tiempo Estimado", type="secondary", use_container_width=True):
+        if origen == destino: st.warning("El hospital de origen y destino no pueden ser el mismo.")
+        else:
+            origen_coords = hospitales_df[hospitales_df['name'] == origen].iloc[0]
+            destino_coords = hospitales_df[hospitales_df['name'] == destino].iloc[0]
+            distancia = haversine(origen_coords['lat'], origen_coords['lon'], destino_coords['lat'], destino_coords['lon'])
+            velocidad_promedio_kmh = 30
+            tiempo_horas = distancia / velocidad_promedio_kmh
+            tiempo_minutos = tiempo_horas * 60
+            st.success(f"**Resultados de la estimación para la ruta: {origen} ➡️ {destino}**")
+            res_col1, res_col2 = st.columns(2)
+            res_col1.metric(label="Distancia en línea recta", value=f"{distancia:.2f} km")
+            res_col2.metric(label="Tiempo de traslado estimado", value=f"~ {tiempo_minutos:.0f} min")
+            google_maps_url = f"https://www.google.com/maps/dir/?api=1&origin={origen_coords['lat']},{origen_coords['lon']}&destination={destino_coords['lat']},{destino_coords['lon']}&travelmode=driving"
+            st.link_button("Ver Ruta en Google Maps", google_maps_url, use_container_width=True)
+            st.info("Nota: El tiempo estimado no considera tráfico real. El enlace a Google Maps mostrará la ruta y el tiempo real.")
 
-            submit_add_donante = st.form_submit_button("Registrar Donante")
-
-            if submit_add_donante:
-                if not all([nombre_donante, apellido_donante, dni_donante, sexo_donante]):
-                    st.warning("Por favor, completá todos los campos del donante.")
-                else:
-                    try:
-                        dni_int = int(dni_donante)
-                        conn_donante = connect_to_supabase()
-                        if conn_donante:
-                            check_dni_query = "SELECT id FROM donante WHERE dni = %s"
-                            existing_dni = execute_query(check_dni_query, conn=conn_donante, params=(dni_int,), is_select=True)
-                            if not existing_dni.empty:
-                                st.error("El DNI ingresado ya corresponde a un donante registrado.")
-                                conn_donante.close()
-                            else:
-                                query_add_donante = """
-                                INSERT INTO donante (nombre, apellido, dni, sexo)
-                                VALUES (%s, %s, %s, %s)
-                                """
-                                params_add_donante = (nombre_donante, apellido_donante, dni_int, sexo_donante)
-                                if execute_query(query_add_donante, conn=conn_donante, params=params_add_donante, is_select=False):
-                                    st.success("✅ Donante registrado correctamente.")
-                                    st.rerun()
-                                else:
-                                    st.error("❌ Error al registrar el donante.")
-                                conn_donante.close()
-                        else:
-                            st.error("No se pudo conectar a la base de datos.")
-                    except ValueError:
-                        st.error("El DNI debe contener solo números. Por favor, verifica el formato.")
-                    except Exception as e:
-                        st.error(f"Ocurrió un error inesperado al registrar el donante: {e}")
+# --- Cierre de conexión ---
+if conn: conn.close()

@@ -8,18 +8,47 @@ import streamlit as st # Importa streamlit aquí para usar st.error
 
 load_dotenv() # Cargar variables de entorno del archivo .env
 
+# --- CÓDIGO DE DIAGNÓSTICO (TEMPORAL) ---
+print("--- INICIANDO DIAGNÓSTICO DE VARIABLES DE ENTORNO ---")
+host = os.getenv("SUPABASE_DB_HOST")
+db_name = os.getenv("SUPABASE_DB_NAME")
+user = os.getenv("SUPABASE_DB_USER")
+password = os.getenv("SUPABASE_DB_PASSWORD")
+port = os.getenv("SUPABASE_DB_PORT")
+
+print(f"HOST LEÍDO: {host}")
+print(f"DB_NAME LEÍDO: {db_name}")
+print(f"USER LEÍDO: {user}")
+# Por seguridad, no imprimimos la contraseña real, solo si la encontró o no.
+print(f"PASSWORD LEÍDO: {'******' if password else None}")
+print(f"PORT LEÍDO: {port}")
+print("--- FIN DEL DIAGNÓSTICO ---")
+# --- FIN DEL CÓDIGO DE DIAGNÓSTICO ---
+
 def connect_to_supabase():
     """
     Establece una conexión con la base de datos Supabase usando psycopg2.
     Retorna el objeto de conexión si es exitoso, None en caso contrario.
     """
     try:
+        # Re-leemos las variables aquí para asegurarnos de que la función las usa.
+        db_host = os.getenv("SUPABASE_DB_HOST")
+        db_name = os.getenv("SUPABASE_DB_NAME")
+        db_user = os.getenv("SUPABASE_DB_USER")
+        db_password = os.getenv("SUPABASE_DB_PASSWORD")
+        db_port = os.getenv("SUPABASE_DB_PORT")
+        
+        # Verificación para asegurarnos de que las variables no son None
+        if not all([db_host, db_name, db_user, db_password, db_port]):
+            st.error("Una o más variables de entorno de Supabase no están definidas.")
+            return None
+
         conn = psycopg2.connect(
-            host=os.getenv("SUPABASE_DB_HOST"),
-            database=os.getenv("SUPABASE_DB_NAME"),
-            user=os.getenv("SUPABASE_DB_USER"),
-            password=os.getenv("SUPABASE_DB_PASSWORD"),
-            port=os.getenv("SUPABASE_DB_PORT")
+            host=db_host,
+            database=db_name,
+            user=db_user,
+            password=db_password,
+            port=db_port
         )
         return conn
     except Exception as e:
