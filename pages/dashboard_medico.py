@@ -213,7 +213,7 @@ medico_apellido = medico_info.iloc[0]['apellido']
 st.sidebar.title("Portal Médico")
 st.sidebar.markdown(f"""
 <div class="sidebar-metric">
-    <h3 style="margin: 0; color: var(--primary-color);">👨‍⚕️ {medico_nombre} {medico_apellido}</h3>
+    <h3 style="margin: 0; color: var(--primary-color);">🧑‍⚕️ {medico_nombre} {medico_apellido}</h3>
     <p style="margin: 0.5rem 0; color: var(--text-secondary);">ID: {medico_id}</p>
 </div>
 """, unsafe_allow_html=True)
@@ -310,44 +310,6 @@ if opcion == "🏠 Inicio":
     
     st.markdown("---")
     
-    # Acciones rápidas
-    st.subheader("🚀 Acciones Rápidas")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        <div class="feature-card">
-            <h4>📋 Explorar Tejidos</h4>
-            <p>Busca y filtra tejidos disponibles en el sistema</p>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("Ver Tejidos Disponibles", use_container_width=True):
-            st.session_state.opcion = "📋 Ver Tejidos"
-            st.rerun()
-    
-    with col2:
-        st.markdown("""
-        <div class="feature-card">
-            <h4>📦 Gestionar Solicitudes</h4>
-            <p>Revisa el estado de tus solicitudes de tejidos</p>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("Ver Mis Solicitudes", use_container_width=True):
-            st.session_state.opcion = "📦 Mis Solicitudes"
-            st.rerun()
-    
-    with col3:
-        st.markdown("""
-        <div class="feature-card">
-            <h4>🌐 Red Hospitalaria</h4>
-            <p>Explora la red de hospitales y logística</p>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("Ver Red de Hospitales", use_container_width=True):
-            st.session_state.opcion = "🌐 Red de Hospitales"
-            st.rerun()
-    
     # Solicitudes recientes
     if not mis_solicitudes.empty:
         st.markdown("---")
@@ -386,18 +348,20 @@ if opcion == "🏠 Inicio":
 elif opcion == "📋 Ver Tejidos":
     st.title("📋 Todos los Tejidos Disponibles")
 
-    # Filtros en columnas
-    col1, col2, col3, col4 = st.columns(4)
+    # Filtros en columnas - AGREGAR FILTRO DE TIPO DE SANGRE
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         filtro_tipo = st.text_input("🔍 Filtrar por Tipo")
     with col2:
         filtro_ubicacion = st.text_input("📍 Filtrar por Ubicación")
     with col3:
-        filtro_estado = st.selectbox("📊 Estado", ["", "Disponible", "Reservado", "Enviado"])
+        filtro_estado = st.selectbox("📊 Estado", ["", "Disponible", "Reservado", "Enviado", "En Cuarentena"])
     with col4:
         filtro_descripcion = st.text_input("📝 Filtrar por Descripción")
+    with col5:
+        filtro_sangre = st.selectbox("🩸 Tipo de Sangre", ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"])
 
-    # Query unificada de tejidos con detalles_tejido
+    # Query actualizada CON información del donante y tipo de sangre
     query = """
     SELECT 
         t.tipo,
@@ -407,14 +371,18 @@ elif opcion == "📋 Ver Tejidos":
         t.condicion_recoleccion,
         t.fecha_recoleccion,
         t.fecha_de_estado,
+        d.nombre || ' ' || d.apellido as donante_nombre,
+        d.tipo_sangre,
+        d.sexo as donante_sexo,
         t.id as tejido_id
     FROM tejidos t
     LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo
+    LEFT JOIN donante d ON t.id_donante = d.id
     WHERE TRUE
     """
     params = []
 
-    # Aplicar filtros
+    # Aplicar filtros existentes
     if filtro_tipo:
         query += " AND t.tipo ILIKE %s"
         params.append(f"%{filtro_tipo}%")
@@ -427,6 +395,11 @@ elif opcion == "📋 Ver Tejidos":
     if filtro_descripcion:
         query += " AND dt.descripcion ILIKE %s"
         params.append(f"%{filtro_descripcion}%")
+    
+    # NUEVO FILTRO: Tipo de sangre
+    if filtro_sangre:
+        query += " AND d.tipo_sangre = %s"
+        params.append(filtro_sangre)
 
     query += " ORDER BY t.tipo, dt.ubicacion"
 
@@ -437,7 +410,7 @@ elif opcion == "📋 Ver Tejidos":
     else:
         st.success(f"Se encontraron {len(tejidos)} tejidos.")
         
-        # Preparar datos para mostrar (sin IDs)
+        # Preparar datos para mostrar
         tejidos_display = tejidos.copy()
         # Eliminar la columna tejido_id para no mostrarla
         if 'tejido_id' in tejidos_display.columns:
@@ -451,12 +424,15 @@ elif opcion == "📋 Ver Tejidos":
             'estado': 'Estado',
             'condicion_recoleccion': 'Condición de Recolección',
             'fecha_recoleccion': 'Fecha de Recolección',
-            'fecha_de_estado': 'Fecha de Estado'
+            'fecha_de_estado': 'Fecha de Estado',
+            'donante_nombre': 'Donante',
+            'tipo_sangre': '🩸 Tipo de Sangre',
+            'donante_sexo': 'Sexo del Donante'
         }
         
         tejidos_display = tejidos_display.rename(columns=column_mapping)
         
-        # Mostrar tabla
+        # Mostrar tabla con información ampliada
         st.dataframe(
             tejidos_display,
             use_container_width=True,
@@ -465,9 +441,39 @@ elif opcion == "📋 Ver Tejidos":
                 "Estado": st.column_config.TextColumn(
                     "Estado",
                     help="Estado actual del tejido"
+                ),
+                "🩸 Tipo de Sangre": st.column_config.TextColumn(
+                    "🩸 Tipo de Sangre",
+                    help="Tipo de sangre del donante"
+                ),
+                "Donante": st.column_config.TextColumn(
+                    "Donante",
+                    help="Nombre del donante"
                 )
             }
         )
+
+        # Información adicional expandible
+        with st.expander("ℹ️ Información sobre Compatibilidad de Tipos de Sangre"):
+            st.markdown("""
+            ### 🩸 **Guía de Compatibilidad de Tipos de Sangre para Trasplantes**
+            
+            **Donantes Universales:**
+            - **Tipo O-**: Puede donar a todos los tipos (donante universal)
+            - **Tipo AB+**: Puede recibir de todos los tipos (receptor universal)
+            
+            **Compatibilidades Generales:**
+            - **A+**: Puede donar a A+, AB+ | Puede recibir de A+, A-, O+, O-
+            - **A-**: Puede donar a A+, A-, AB+, AB- | Puede recibir de A-, O-
+            - **B+**: Puede donar a B+, AB+ | Puede recibir de B+, B-, O+, O-
+            - **B-**: Puede donar a B+, B-, AB+, AB- | Puede recibir de B-, O-
+            - **AB+**: Puede donar solo a AB+ | Puede recibir de todos
+            - **AB-**: Puede donar a AB+, AB- | Puede recibir de A-, B-, AB-, O-
+            - **O+**: Puede donar a A+, B+, AB+, O+ | Puede recibir de O+, O-
+            - **O-**: Puede donar a todos | Puede recibir solo de O-
+            
+            **⚠️ Nota:** Esta es una guía general. Siempre consulte con el equipo médico para verificar compatibilidad específica del procedimiento.
+            """)
         
         # Sección de solicitud de tejido (parte inferior)
         st.markdown("---")

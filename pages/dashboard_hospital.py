@@ -356,8 +356,23 @@ if opcion_utilidades == "Gestión de Inventario":
                     donante_sel = st.selectbox("Donante", opciones_donante, index=None, placeholder="Elige un donante existente...")
             else:
                 st.subheader("Datos del Nuevo Donante")
-                c1, c2 = st.columns(2); nombre_donante = c1.text_input("Nombre(s)"); apellido_donante = c2.text_input("Apellido(s)")
-                c3, c4 = st.columns(2); dni_donante = c3.text_input("DNI (solo números)"); sexo_donante = c4.selectbox("Sexo", ["Masculino", "Femenino"])
+                c1, c2 = st.columns(2)
+                nombre_donante = c1.text_input("Nombre(s)")
+                apellido_donante = c2.text_input("Apellido(s)")
+    
+                c3, c4 = st.columns(2)
+                dni_donante = c3.text_input("DNI (solo números)")
+                sexo_donante = c4.selectbox("Sexo", ["Masculino", "Femenino"])
+    
+                # NUEVA SECCIÓN: Tipo de Sangre
+                c5, c6 = st.columns(2)
+                tipo_sangre_donante = c5.selectbox(
+                    "🩸 Tipo de Sangre", 
+                    ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"],
+                    help="Tipo de sangre del donante"
+                )
+                c6.empty() 
+                
             st.markdown("---")
             st.subheader("Paso 2: Datos de Recolección")
             medicos_df = get_medicos(conn)
@@ -372,23 +387,35 @@ if opcion_utilidades == "Gestión de Inventario":
                 tejido_sel = st.selectbox("Tipo de Tejido", opciones_tejido, index=None, placeholder="Elige un tipo de tejido...")
             else:
                 st.error("No se encontraron tipos de tejido."); tejido_sel = None
-            c5, c6 = st.columns(2)
-            fecha_recoleccion = c5.date_input("Fecha de Recolección", datetime.now().date())
-            estado_inicial = c6.selectbox("Estado Inicial", ['Disponible', 'En Cuarentena'])
+            c7, c8 = st.columns(2)
+            fecha_recoleccion = c7.date_input("Fecha de Recolección", datetime.now().date())
+            estado_inicial = c8.selectbox("Estado Inicial", ['Disponible', 'En Cuarentena'])
             condicion_recoleccion = st.text_area("Condición de Recolección", placeholder="Ej: óptima, sin patologías...")
             submitted = st.form_submit_button("Registrar Tejido", use_container_width=True)
+            
             if submitted:
                 id_donante_final = None
                 if st.session_state.tipo_donante == "Nuevo Donante":
-                    if all([nombre_donante, apellido_donante, dni_donante]):
+                    if all([nombre_donante, apellido_donante, dni_donante, tipo_sangre_donante]):
                         try:
                             dni_int = int(dni_donante)
-                            insert_query = "INSERT INTO donante (nombre, apellido, dni, sexo) VALUES (%s, %s, %s, %s) RETURNING id"
-                            new_id_df = execute_query(insert_query, conn, (nombre_donante, apellido_donante, dni_int, sexo_donante), is_select=True)
+                            # QUERY ACTUALIZADA con tipo_sangre
+                            insert_query = """
+                                INSERT INTO donante (nombre, apellido, dni, sexo, tipo_sangre) 
+                                VALUES (%s, %s, %s, %s, %s) RETURNING id
+                            """
+                            new_id_df = execute_query(
+                                insert_query, 
+                                conn, 
+                                (nombre_donante, apellido_donante, dni_int, sexo_donante, tipo_sangre_donante), 
+                                is_select=True
+                            )
                             if new_id_df is not None and not new_id_df.empty:
                                 id_donante_final = int(new_id_df.iloc[0]['id'])
-                        except Exception as e: st.error(f"Error al registrar donante: {e}")
-                    else: st.error("Faltan datos del nuevo donante.")
+                        except Exception as e: 
+                            st.error(f"Error al registrar donante: {e}")
+                    else: 
+                        st.error("Faltan datos del nuevo donante (incluyendo tipo de sangre).")
                 else:
                     if 'donante_sel' in locals() and donante_sel:
                         dni_sel_val = int(donante_sel.split("DNI: ")[1][:-1])
@@ -412,7 +439,20 @@ if opcion_utilidades == "Gestión de Inventario":
                     if not tejido_sel: st.error("Error de validación: El tipo de tejido no fue seleccionado.")
 
     with st.expander("🔄 **Actualizar Estado de Tejido Existente**"):
-        query_inventory_update = "SELECT t.id, dt.descripcion, t.estado, t.fecha_recoleccion, d.nombre || ' ' || d.apellido as donante FROM tejidos t LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo LEFT JOIN donante d ON t.id_donante = d.id WHERE t.id_hospital = %s ORDER BY t.id DESC"
+        query_inventory_update = """
+        SELECT 
+            t.id, 
+            dt.descripcion, 
+            t.estado, 
+            t.fecha_recoleccion, 
+            d.nombre || ' ' || d.apellido as donante,
+            COALESCE(d.tipo_sangre, 'No especificado') as tipo_sangre
+        FROM tejidos t 
+        LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo 
+        LEFT JOIN donante d ON t.id_donante = d.id 
+        WHERE t.id_hospital = %s 
+        ORDER BY t.id DESC
+        """
         inventory_df_update = execute_query(query_inventory_update, conn=conn, params=(hospital_id,), is_select=True)
         
         if not inventory_df_update.empty:
@@ -434,7 +474,21 @@ if opcion_utilidades == "Gestión de Inventario":
 
     st.markdown("---")
     st.subheader("Inventario Actual")
-    inventory_df_final = execute_query(f"SELECT t.id, dt.descripcion, t.estado, t.fecha_recoleccion, d.nombre || ' ' || d.apellido as donante FROM tejidos t LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo LEFT JOIN donante d ON t.id_donante = d.id WHERE t.id_hospital = {hospital_id} ORDER BY t.id DESC", conn, is_select=True)
+    inventory_query_final = f"""
+    SELECT 
+        t.id, 
+        dt.descripcion, 
+        t.estado, 
+        t.fecha_recoleccion, 
+        d.nombre || ' ' || d.apellido as donante,
+        COALESCE(d.tipo_sangre, 'No especificado') as tipo_sangre
+    FROM tejidos t
+    LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo
+    LEFT JOIN donante d ON t.id_donante = d.id
+    WHERE t.id_hospital = {hospital_id}
+    ORDER BY t.id DESC
+    """
+    inventory_df_final = execute_query(inventory_query_final, conn, is_select=True)
     st.dataframe(inventory_df_final, use_container_width=True, hide_index=True)
 
 
@@ -502,7 +556,7 @@ elif opcion_utilidades == "Trazabilidad de Tejidos":
         if tejido_id_busqueda.isdigit():
             query = """
                 SELECT t.*, dt.descripcion, d.nombre as d_nombre, d.apellido as d_apellido, 
-                       m.nombre as m_nombre, m.apellido as m_apellido, h.nombre as h_nombre
+                       d.tipo_sangre, m.nombre as m_nombre, m.apellido as m_apellido, h.nombre as h_nombre
                 FROM tejidos t
                 LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo
                 LEFT JOIN donante d ON t.id_donante = d.id
@@ -522,9 +576,13 @@ elif opcion_utilidades == "Trazabilidad de Tejidos":
                 st.text_area("Condición de Recolección", data['condicion_recoleccion'], height=100, disabled=True)
                 st.markdown("---")
                 st.subheader("Información de Origen")
-                st.markdown(f"**Donante:** {data['d_nombre']} {data['d_apellido']}")
-                st.markdown(f"**Médico Recolector:** {data['m_nombre']} {data['m_apellido']}")
-                st.markdown(f"**Hospital de Registro:** {data['h_nombre']}")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown(f"**Donante:** {data['d_nombre']} {data['d_apellido']}")
+                    st.markdown(f"**Tipo de Sangre:** 🩸 {data['tipo_sangre'] or 'No especificado'}")
+                with col2:
+                    st.markdown(f"**Médico Recolector:** {data['m_nombre']} {data['m_apellido']}")
+                    st.markdown(f"**Hospital de Registro:** {data['h_nombre']}")
             else:
                 st.error("No se encontró ningún tejido con ese ID.")
         else:
@@ -550,7 +608,8 @@ elif opcion_utilidades == "Red de Hospitales y Logística":
     destino = col2.selectbox("🏁 Hospital de Destino", options=hospitales_df['name'], index=1)
         
     if st.button("Calcular Tiempo Estimado", type="secondary", use_container_width=True):
-        if origen == destino: st.warning("El hospital de origen y destino no pueden ser el mismo.")
+        if origen == destino: 
+            st.warning("El hospital de origen y destino no pueden ser el mismo.")
         else:
             origen_coords = hospitales_df[hospitales_df['name'] == origen].iloc[0]
             destino_coords = hospitales_df[hospitales_df['name'] == destino].iloc[0]
