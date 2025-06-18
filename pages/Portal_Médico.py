@@ -1,3 +1,5 @@
+## Portal_Médico.py - Versión de Transición
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
@@ -171,11 +173,20 @@ load_css()
 
 # Verificación de sesión y obtención de información del médico
 if "logged_in" not in st.session_state or not st.session_state["logged_in"]:
-    st.error("No estás logueado. Por favor, iniciá sesión desde la página principal.")
+    st.error("No tienes permiso para acceder. Por favor, inicia sesión.")
     st.stop()
+
+# Verificar que el usuario tenga rol de médico
+user_role = st.session_state.get("role", "").strip()
+if user_role not in ["Médico", "Medico", "medico", "médico"]:
+    st.error("No tienes permiso para acceder. Por favor, inicia sesión.")
+    st.stop()
+
 
 # Obtener y validar información del médico logueado
 medico_id = st.session_state.get("user_id")
+
+
 if not medico_id:
     st.error("❌ Error: No se pudo obtener tu ID de usuario. Por favor, vuelve a iniciar sesión.")
     st.stop()
@@ -243,7 +254,7 @@ if not solicitudes_medico.empty:
 st.sidebar.markdown("---")
 opcion = st.sidebar.radio(
     "Navegación", 
-    ["🏠 Inicio", "📋 Ver Tejidos", "📦 Mis Solicitudes", "🌐 Red de Hospitales", "📊 Mi Dashboard", "🔬 Seguimiento de Casos"]
+    ["🏠 Inicio", "📋 Ver Tejidos", "📦 Mis Solicitudes", "🌐 Red de Hospitales", "📊 Mi Dashboard"]
 )
 
 # --------------------------------------------
@@ -353,7 +364,7 @@ elif opcion == "📋 Ver Tejidos":
     with col1:
         filtro_tipo = st.text_input("🔍 Filtrar por Tipo")
     with col2:
-        filtro_ubicacion = st.text_input("📍 Filtrar por Ubicación")
+        filtro_ubicacion = st.text_input("📍 Filtrar por Hospital")
     with col3:
         filtro_estado = st.selectbox("📊 Estado", ["", "Disponible", "Reservado", "Enviado", "En Cuarentena"])
     with col4:
@@ -361,12 +372,12 @@ elif opcion == "📋 Ver Tejidos":
     with col5:
         filtro_sangre = st.selectbox("🩸 Tipo de Sangre", ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"])
 
-    # Query actualizada CON información del donante y tipo de sangre
+    # UPDATED QUERY: Now using hospital name as location instead of tissue location
     query = """
     SELECT 
         t.tipo,
         COALESCE(dt.descripcion, '') as descripcion,
-        COALESCE(dt.ubicacion, '') as ubicacion,
+        h.nombre as ubicacion,
         t.estado,
         t.condicion_recoleccion,
         t.fecha_recoleccion,
@@ -374,10 +385,12 @@ elif opcion == "📋 Ver Tejidos":
         d.nombre || ' ' || d.apellido as donante_nombre,
         d.tipo_sangre,
         d.sexo as donante_sexo,
-        t.id as tejido_id
+        t.id as tejido_id,
+        t.id_hospital
     FROM tejidos t
     LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo
     LEFT JOIN donante d ON t.id_donante = d.id
+    LEFT JOIN hospital h ON t.id_hospital = h.id
     WHERE TRUE
     """
     params = []
@@ -387,7 +400,7 @@ elif opcion == "📋 Ver Tejidos":
         query += " AND t.tipo ILIKE %s"
         params.append(f"%{filtro_tipo}%")
     if filtro_ubicacion:
-        query += " AND dt.ubicacion ILIKE %s"
+        query += " AND h.nombre ILIKE %s"
         params.append(f"%{filtro_ubicacion}%")
     if filtro_estado:
         query += " AND t.estado = %s"
@@ -401,7 +414,7 @@ elif opcion == "📋 Ver Tejidos":
         query += " AND d.tipo_sangre = %s"
         params.append(filtro_sangre)
 
-    query += " ORDER BY t.tipo, dt.ubicacion"
+    query += " ORDER BY t.tipo, h.nombre"
 
     tejidos = execute_query(query, conn=conn, params=tuple(params), is_select=True)
 
@@ -412,15 +425,17 @@ elif opcion == "📋 Ver Tejidos":
         
         # Preparar datos para mostrar
         tejidos_display = tejidos.copy()
-        # Eliminar la columna tejido_id para no mostrarla
-        if 'tejido_id' in tejidos_display.columns:
-            tejidos_display = tejidos_display.drop('tejido_id', axis=1)
+        # Eliminar columnas que no queremos mostrar
+        columns_to_remove = ['tejido_id', 'id_hospital']
+        for col in columns_to_remove:
+            if col in tejidos_display.columns:
+                tejidos_display = tejidos_display.drop(col, axis=1)
         
         # Renombrar columnas para mejor presentación
         column_mapping = {
             'tipo': 'Tipo de Tejido',
             'descripcion': 'Descripción',
-            'ubicacion': 'Ubicación',
+            'ubicacion': 'Hospital',
             'estado': 'Estado',
             'condicion_recoleccion': 'Condición de Recolección',
             'fecha_recoleccion': 'Fecha de Recolección',
@@ -449,6 +464,10 @@ elif opcion == "📋 Ver Tejidos":
                 "Donante": st.column_config.TextColumn(
                     "Donante",
                     help="Nombre del donante"
+                ),
+                "Hospital": st.column_config.TextColumn(
+                    "Hospital",
+                    help="Hospital donde se encuentra el tejido"
                 )
             }
         )
@@ -475,78 +494,196 @@ elif opcion == "📋 Ver Tejidos":
             **⚠️ Nota:** Esta es una guía general. Siempre consulte con el equipo médico para verificar compatibilidad específica del procedimiento.
             """)
         
-        # Sección de solicitud de tejido (parte inferior)
+        # Sección de solicitud de tejido (parte inferior) - CORREGIDA PARA ACTUALIZACIÓN EN TIEMPO REAL
         st.markdown("---")
-        st.subheader("🚀 Solicitar Tejido")
+        st.subheader("🚀 Solicitar Tejido Específico")
+        st.markdown("**Selecciona un tejido específico basado en tipo de sangre y donante**")
         
-        # Crear formulario de solicitud
-        with st.form("form_solicitud_tejido"):
-            col1, col2, col3 = st.columns(3)
+        # PASO 1 y 2: Selecciones FUERA del formulario para actualización en tiempo real
+        col1, col2, col3 = st.columns([3, 3, 2])
+        
+        with col1:
+            # Obtener tipos únicos disponibles
+            tipos_disponibles = [""] + list(tejidos[tejidos['estado'] == 'Disponible']['tipo'].unique())
+            tipo_solicitud = st.selectbox("1️⃣ Tipo de Tejido a Solicitar", tipos_disponibles, key="tipo_solicitud_form")
+        
+        with col2:
+            # Filtrar por tipo de sangre
+            if tipo_solicitud:
+                # Obtener tipos de sangre disponibles para este tipo de tejido
+                tipos_sangre_disponibles = tejidos[
+                    (tejidos['tipo'] == tipo_solicitud) & 
+                    (tejidos['estado'] == 'Disponible') &
+                    (tejidos['tipo_sangre'].notna())
+                ]['tipo_sangre'].unique().tolist()
+                
+                # Agregar opción "Cualquiera"
+                tipos_sangre_opciones = ["Cualquier tipo de sangre"] + sorted(tipos_sangre_disponibles)
+                sangre_seleccionada = st.selectbox("2️⃣ Tipo de Sangre Preferido", tipos_sangre_opciones, key="sangre_form")
+            else:
+                sangre_seleccionada = st.selectbox("2️⃣ Tipo de Sangre Preferido", ["Selecciona primero un tipo de tejido"], disabled=True, key="sangre_form_disabled")
+        
+        with col3:
+            st.markdown("**Actualizar:**")
+            if st.button("🔄 Actualizar", help="Actualiza las opciones disponibles", use_container_width=True, key="btn_update_form"):
+                st.rerun()
+        
+        # PASO 3: Mostrar tejidos específicos disponibles (también FUERA del formulario)
+        tejidos_filtrados = pd.DataFrame()
+        tejido_especifico_seleccionado = None
+        
+        if tipo_solicitud:
+            st.markdown("---")
             
-            with col1:
-                # Obtener tipos únicos disponibles
-                tipos_disponibles = tejidos[tejidos['estado'] == 'Disponible']['tipo'].unique().tolist()
-                tipo_solicitud = st.selectbox("Tipo de Tejido a Solicitar", tipos_disponibles)
+            # Mostrar información de lo que se está buscando
+            col_info1, col_info2 = st.columns(2)
+            with col_info1:
+                st.info(f"🔍 **Buscando:** {tipo_solicitud}")
+            with col_info2:
+                sangre_display = sangre_seleccionada if sangre_seleccionada != "Cualquier tipo de sangre" else "Todos los tipos"
+                st.info(f"🩸 **Filtro sangre:** {sangre_display}")
             
-            with col2:
-                # Filtrar ubicaciones según el tipo seleccionado
-                if tipo_solicitud:
-                    ubicaciones_disponibles = tejidos[
-                        (tejidos['tipo'] == tipo_solicitud) & 
-                        (tejidos['estado'] == 'Disponible')
-                    ]['ubicacion'].unique().tolist()
-                    ubicacion_solicitud = st.selectbox("Ubicación", ubicaciones_disponibles)
-                else:
-                    ubicacion_solicitud = st.selectbox("Ubicación", [])
+            # Filtrar tejidos según las selecciones
+            tejidos_filtrados = tejidos[
+                (tejidos['tipo'] == tipo_solicitud) & 
+                (tejidos['estado'] == 'Disponible')
+            ].copy()
             
-            with col3:
-                # Mostrar estado de disponibilidad
-                if tipo_solicitud and ubicacion_solicitud:
-                    tejido_seleccionado = tejidos[
-                        (tejidos['tipo'] == tipo_solicitud) & 
-                        (tejidos['ubicacion'] == ubicacion_solicitud) &
-                        (tejidos['estado'] == 'Disponible')
-                    ]
-                    if not tejido_seleccionado.empty:
-                        st.success("✅ Disponible")
-                    else:
-                        st.error("❌ No disponible")
-                else:
-                    st.info("Selecciona tipo y ubicación")
+            # Aplicar filtro de tipo de sangre si no es "Cualquiera"
+            if sangre_seleccionada and sangre_seleccionada != "Cualquier tipo de sangre":
+                tejidos_filtrados = tejidos_filtrados[
+                    tejidos_filtrados['tipo_sangre'] == sangre_seleccionada
+                ]
             
-            # Botón de envío
-            submitted = st.form_submit_button("📤 Enviar Solicitud", type="primary", use_container_width=True)
-            
-            if submitted:
-                if not tipo_solicitud or not ubicacion_solicitud:
-                    st.error("⚠️ Por favor selecciona un tipo de tejido y una ubicación.")
-                else:
-                    # Verificar disponibilidad
-                    tejido_disponible = tejidos[
-                        (tejidos['tipo'] == tipo_solicitud) & 
-                        (tejidos['ubicacion'] == ubicacion_solicitud) &
-                        (tejidos['estado'] == 'Disponible')
-                    ]
+            if not tejidos_filtrados.empty:
+                st.success(f"✅ **Se encontraron {len(tejidos_filtrados)} tejido(s) de tipo {tipo_solicitud}**")
+                
+                st.markdown("### 3️⃣ Tejidos Disponibles:")
+                
+                # Crear opciones para el selectbox con información detallada
+                opciones_tejidos = []
+                tejidos_info_dict = {}
+                
+                for _, tejido in tejidos_filtrados.iterrows():
+                    donante_info = f"{tejido['donante_nombre']}" if tejido['donante_nombre'] else "Sin información"
+                    tipo_sangre_info = f"🩸 {tejido['tipo_sangre']}" if tejido['tipo_sangre'] else "🩸 No especificado"
+                    sexo_info = f"({tejido['donante_sexo']})" if tejido['donante_sexo'] else ""
+                    hospital_info = tejido['ubicacion']
+                    fecha_info = tejido['fecha_recoleccion'].strftime('%d/%m/%Y') if tejido['fecha_recoleccion'] else "Sin fecha"
                     
-                    if tejido_disponible.empty:
-                        st.error("❌ El tejido seleccionado no está disponible.")
+                    opcion_texto = f"ID:{tejido['tejido_id']} | {donante_info} {sexo_info} | {tipo_sangre_info} | {hospital_info} | Recolectado: {fecha_info}"
+                    opciones_tejidos.append(opcion_texto)
+                    tejidos_info_dict[opcion_texto] = tejido
+                
+                # Selectbox con key única basada en el contenido
+                opciones_con_placeholder = ["Selecciona un tejido específico..."] + opciones_tejidos
+                hash_unico = hash(f"{tipo_solicitud}_{sangre_seleccionada}_{len(tejidos_filtrados)}_{str(opciones_tejidos)}")
+                
+                col_select, col_btn = st.columns([5, 1])
+                with col_select:
+                    tejido_especifico_seleccionado = st.selectbox(
+                        "Selecciona el tejido específico:",
+                        opciones_con_placeholder,
+                        help="Cada opción muestra: ID del tejido, información del donante, tipo de sangre, hospital y fecha de recolección",
+                        key=f"tejido_selector_{hash_unico}"
+                    )
+                
+                with col_btn:
+                    if st.button("🔄", help="Actualizar lista de tejidos", key=f"btn_refresh_tejidos_{hash_unico}"):
+                        st.rerun()
+                
+                # Mostrar información adicional del tejido seleccionado
+                if tejido_especifico_seleccionado and tejido_especifico_seleccionado != "Selecciona un tejido específico...":
+                    tejido_info = tejidos_info_dict[tejido_especifico_seleccionado]
+                    tejido_id_seleccionado = tejido_info['tejido_id']
+                    
+                    # Mostrar información detallada en un contenedor
+                    with st.container():
+                        st.success(f"✅ **Tejido seleccionado:** {tipo_solicitud} - ID {tejido_id_seleccionado}")
+                        
+                        # Información detallada expandible
+                        with st.expander("📋 Información Detallada del Tejido Seleccionado:", expanded=True):
+                            col_det1, col_det2 = st.columns(2)
+                            with col_det1:
+                                st.markdown(f"""
+                                **📋 Información del Tejido:**
+                                - **Tipo:** {tipo_solicitud}
+                                - **Descripción:** {tejido_info['descripcion']}
+                                - **ID:** {tejido_id_seleccionado}
+                                - **Estado:** {tejido_info['estado']}
+                                - **Condición:** {tejido_info['condicion_recoleccion'] if tejido_info['condicion_recoleccion'] else 'No especificada'}
+                                """)
+                            
+                            with col_det2:
+                                st.markdown(f"""
+                                **👤 Información del Donante:**
+                                - **Hospital:** {tejido_info['ubicacion']}
+                                - **Donante:** {tejido_info['donante_nombre']} ({tejido_info['donante_sexo']})
+                                - **Tipo de Sangre:** 🩸 {tejido_info['tipo_sangre'] if tejido_info['tipo_sangre'] else 'No especificado'}
+                                - **Fecha Recolección:** {tejido_info['fecha_recoleccion'].strftime('%d/%m/%Y %H:%M')}
+                                """)
+                else:
+                    st.info("👆 Selecciona un tejido específico de la lista para ver los detalles")
+                    
+            else:
+                st.warning(f"⚠️ No hay tejidos de tipo **{tipo_solicitud}** disponibles con los criterios seleccionados.")
+                if sangre_seleccionada and sangre_seleccionada != "Cualquier tipo de sangre":
+                    st.info("💡 **Sugerencia:** Intenta cambiar el filtro de tipo de sangre a 'Cualquier tipo de sangre'")
+                
+                # Botón para buscar de nuevo
+                if st.button("🔄 Buscar Nuevamente", key="search_again_form", use_container_width=True):
+                    st.rerun()
+        else:
+            st.info("👆 **Paso 1:** Selecciona un tipo de tejido para comenzar")
+        
+        # PASO 4: Formulario SOLO para el botón de envío
+        if tipo_solicitud and not tejidos_filtrados.empty and tejido_especifico_seleccionado and tejido_especifico_seleccionado != "Selecciona un tejido específico...":
+            st.markdown("---")
+            st.markdown("### 4️⃣ Confirmar Solicitud:")
+            
+            # Obtener info del tejido seleccionado
+            tejido_info_final = tejidos_info_dict[tejido_especifico_seleccionado]
+            tejido_id_final = tejido_info_final['tejido_id']
+            
+            with st.form(f"form_confirmar_solicitud_{tejido_id_final}"):
+                st.info(f"""
+                **📋 Resumen de tu solicitud:**
+                - **Tipo:** {tipo_solicitud} - {tejido_info_final['descripcion']}
+                - **Tejido ID:** {tejido_id_final}
+                - **Hospital:** {tejido_info_final['ubicacion']}
+                - **Donante:** {tejido_info_final['donante_nombre']} ({tejido_info_final['donante_sexo']})
+                - **Tipo de Sangre:** 🩸 {tejido_info_final['tipo_sangre']}
+                """)
+                
+                # Botón de envío
+                submitted = st.form_submit_button("📤 Confirmar y Enviar Solicitud", type="primary", use_container_width=True)
+                
+                if submitted:
+                    hospital_destino = tejido_info_final['ubicacion']
+                    
+                    # Verificar que el tejido sigue disponible
+                    verificar_query = "SELECT estado FROM tejidos WHERE id = %s"
+                    estado_actual = execute_query(verificar_query, conn, (tejido_id_final,), is_select=True)
+                    
+                    if estado_actual.empty or estado_actual.iloc[0]['estado'] != 'Disponible':
+                        st.error("❌ El tejido seleccionado ya no está disponible.")
                     else:
-                        # Verificar solicitud existente
-                        verificar_query = """
+                        # Verificar solicitud existente para este tipo de tejido en este hospital
+                        verificar_solicitud_query = """
                             SELECT id FROM solicitud 
                             WHERE medico_id = %s AND tipo = %s AND ubicacion = %s AND estado = 'pendiente'
                         """
                         solicitud_existente = execute_query(
-                            verificar_query,
+                            verificar_solicitud_query,
                             conn=conn,
-                            params=(medico_id, tipo_solicitud, ubicacion_solicitud),
+                            params=(medico_id, tipo_solicitud, hospital_destino),
                             is_select=True
                         )
                         
                         if not solicitud_existente.empty:
-                            st.warning("⚠️ Ya tienes una solicitud pendiente para este tipo de tejido en esta ubicación.")
+                            st.warning("⚠️ Ya tienes una solicitud pendiente para este tipo de tejido en este hospital.")
                         else:
-                            # Crear la solicitud
+                            # Crear la solicitud específica
                             solicitud_query = """
                                 INSERT INTO solicitud (medico_id, tipo, ubicacion, estado, fecha_solicitud)
                                 VALUES (%s, %s, %s, 'pendiente', NOW())
@@ -554,19 +691,61 @@ elif opcion == "📋 Ver Tejidos":
                             success = execute_query(
                                 solicitud_query,
                                 conn=conn,
-                                params=(medico_id, tipo_solicitud, ubicacion_solicitud),
+                                params=(medico_id, tipo_solicitud, hospital_destino),
                                 is_select=False
                             )
                             
                             if success:
-                                st.success("✅ ¡Solicitud enviada correctamente!")
-                                st.info("Puedes ver tu solicitud en la sección 'Mis Solicitudes'")
+                                st.success("✅ ¡Solicitud de tejido específico enviada correctamente!")
+                                st.balloons()
+                                
+                                # Mostrar confirmación detallada
+                                st.info(f"""
+                                **📋 Solicitud confirmada:**
+                                - **Tejido solicitado:** ID {tejido_id_final}
+                                - **Hospital:** {hospital_destino}
+                                - **Donante:** {tejido_info_final['donante_nombre']}
+                                - **Tipo de sangre:** 🩸 {tejido_info_final['tipo_sangre']}
+                                """)
+                                
+                                st.markdown("Puedes ver tu solicitud en la sección 'Mis Solicitudes'")
+                                
                                 # Recargar la página para actualizar datos
                                 import time
-                                time.sleep(1)
+                                time.sleep(2)
                                 st.rerun()
                             else:
                                 st.error("❌ No se pudo enviar la solicitud. Inténtalo nuevamente.")
+        
+        elif tipo_solicitud and tejidos_filtrados.empty:
+            st.markdown("---")
+            st.warning("⚠️ No se puede enviar solicitud: No hay tejidos disponibles con los criterios seleccionados.")
+        elif tipo_solicitud and not tejido_especifico_seleccionado:
+            st.markdown("---")
+            st.info("⚠️ Para enviar la solicitud, selecciona un tejido específico de la lista de arriba.")
+        
+        # Información adicional
+        with st.expander("💡 **Consejos para usar esta herramienta**"):
+            st.markdown("""
+            **🎯 Pasos para solicitar un tejido:**
+            1. **Selecciona el tipo de tejido** que necesitas (ej: MENISCO, CORNEA, etc.)
+            2. **Filtra por tipo de sangre** si es importante para tu procedimiento
+            3. **Usa "🔄 Actualizar"** si las opciones no se actualizan automáticamente
+            4. **Selecciona el tejido específico** de la lista que aparece
+            5. **Revisa la información detallada** del tejido seleccionado
+            6. **Confirma y envía** la solicitud
+            
+            **🔄 Si las opciones no se actualizan:**
+            - Haz clic en **"🔄 Actualizar"** junto a los filtros
+            - Haz clic en el **"🔄"** pequeño junto al selector de tejidos
+            - Usa **"🔄 Buscar Nuevamente"** si no aparecen resultados
+            
+            **🩸 Sobre los tipos de sangre:**
+            - Algunos tipos de tejidos pueden tener limitaciones de compatibilidad
+            - Si ves pocos resultados, intenta "Cualquier tipo de sangre"
+            - Siempre consulta con tu equipo sobre compatibilidad específica
+            """)
+        
 
 # --------------------------------------------
 # 📦 SECCIÓN: MIS SOLICITUDES
@@ -574,7 +753,7 @@ elif opcion == "📋 Ver Tejidos":
 elif opcion == "📦 Mis Solicitudes":
     st.title("📦 Historial de Mis Solicitudes")
     
-    # Consulta para obtener las solicitudes del médico
+    # QUERY usando la estructura actual de la DB
     solicitud_query = """
     SELECT id, fecha_solicitud, estado, tipo, ubicacion
     FROM solicitud
@@ -626,7 +805,7 @@ elif opcion == "📦 Mis Solicitudes":
                 'fecha_solicitud': 'Fecha de Solicitud',
                 'estado': 'Estado',
                 'tipo': 'Tipo de Tejido',
-                'ubicacion': 'Ubicación'
+                'ubicacion': 'Hospital'
             }
             
             solicitudes_display = solicitudes_display.rename(columns=column_mapping)
@@ -648,6 +827,10 @@ elif opcion == "📦 Mis Solicitudes":
                     "Fecha de Solicitud": st.column_config.DatetimeColumn(
                         "Fecha de Solicitud",
                         help="Fecha y hora de la solicitud"
+                    ),
+                    "Hospital": st.column_config.TextColumn(
+                        "Hospital",
+                        help="Hospital al que se solicitó el tejido"
                     )
                 }
             )
@@ -705,7 +888,7 @@ elif opcion == "📊 Mi Dashboard":
     st.title("📊 Mi Dashboard Personal")
     st.markdown("Análisis detallado de tu actividad médica en el banco de tejidos.")
     
-    # Obtener datos para análisis
+    # Obtener datos para análisis - usando estructura actual de DB
     mis_solicitudes_detalle = execute_query(
         """
         SELECT s.*, dt.descripcion 
@@ -756,6 +939,18 @@ elif opcion == "📊 Mi Dashboard":
             if not estado_counts.empty:
                 st.bar_chart(estado_counts)
         
+        # Análisis por hospital
+        st.markdown("---")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Solicitudes por Hospital")
+            hospital_counts = mis_solicitudes_detalle['ubicacion'].value_counts()
+            if not hospital_counts.empty:
+                st.bar_chart(hospital_counts)
+            else:
+                st.info("No hay datos suficientes para mostrar el gráfico.")
+        
         # Actividad reciente
         st.markdown("---")
         st.subheader("Actividad Reciente (Últimos 30 días)")
@@ -778,12 +973,14 @@ elif opcion == "📊 Mi Dashboard":
                     'enviada': '📦'
                 }.get(solicitud['estado'], '⚪')
                 
+                ubicacion_display = solicitud['ubicacion'] if solicitud['ubicacion'] else "Hospital no especificado"
+                
                 st.markdown(f"""
                 <div class="feature-card">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <div>
                             <strong>{solicitud['descripcion'] or solicitud['tipo']}</strong><br>
-                            <small>Hace {días_transcurridos} días - {solicitud['ubicacion']}</small>
+                            <small>Hace {días_transcurridos} días - {ubicacion_display}</small>
                         </div>
                         <div style="text-align: right;">
                             {estado_emoji} {solicitud['estado'].title()}
@@ -796,99 +993,6 @@ elif opcion == "📊 Mi Dashboard":
     else:
         st.info("Aún no tienes actividad registrada en el sistema.")
         st.markdown("💡 **Sugerencia:** Comienza explorando los tejidos disponibles y realizando tu primera solicitud.")
-
-# --------------------------------------------
-# 🔬 SECCIÓN: SEGUIMIENTO DE CASOS
-# --------------------------------------------
-elif opcion == "🔬 Seguimiento de Casos":
-    st.title("🔬 Seguimiento de Casos Clínicos")
-    st.markdown("Registra y da seguimiento a tus casos que requieren tejidos específicos.")
-    
-    # Formulario para registrar nuevo caso
-    with st.expander("➕ Registrar Nuevo Caso Clínico", expanded=False):
-        with st.form("form_nuevo_caso"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                paciente_id = st.text_input("ID del Paciente (opcional)", placeholder="P001234")
-                edad_paciente = st.number_input("Edad del Paciente", min_value=0, max_value=120, value=30)
-                sexo_paciente = st.selectbox("Sexo", ["Masculino", "Femenino", "Otro"])
-            
-            with col2:
-                diagnostico = st.text_input("Diagnóstico Principal", placeholder="Ej: Quemadura de segundo grado")
-                urgencia = st.selectbox("Nivel de Urgencia", ["Baja", "Media", "Alta", "Crítica"])
-                fecha_cirugia = st.date_input("Fecha Estimada de Cirugía", value=datetime.now().date() + timedelta(days=7))
-            
-            # Obtener tipos de tejido para el caso
-            tipos_tejido_df = execute_query("SELECT tipo, descripcion FROM detalles_tejido ORDER BY descripcion", conn=conn, is_select=True)
-            if not tipos_tejido_df.empty:
-                opciones_tejido = [f"{row['descripcion']} ({row['tipo']})" for _, row in tipos_tejido_df.iterrows()]
-                tejido_requerido = st.selectbox("Tipo de Tejido Requerido", opciones_tejido)
-            
-            notas_adicionales = st.text_area("Notas Adicionales del Caso", height=100)
-            
-            submitted_caso = st.form_submit_button("📝 Registrar Caso", use_container_width=True)
-            
-            if submitted_caso:
-                # En una implementación real, aquí guardarías el caso en una tabla de casos clínicos
-                # Por ahora, simulamos el guardado
-                st.success("✅ Caso clínico registrado exitosamente!")
-                st.info("💡 Tip: Puedes ahora solicitar el tejido requerido desde la sección 'Ver Tejidos'")
-    
-    # Mostrar casos registrados (simulado)
-    st.markdown("---")
-    st.subheader("📋 Mis Casos Activos")
-    
-    # Datos simulados de casos (en una implementación real vendrían de la BD)
-    casos_ejemplo = [
-        {
-            "id_caso": "CASO001",
-            "paciente": "P123456",
-            "diagnostico": "Quemadura de segundo grado",
-            "tejido_requerido": "Piel",
-            "urgencia": "Alta",
-            "fecha_cirugia": "2025-06-15",
-            "estado": "Tejido Solicitado"
-        },
-        {
-            "id_caso": "CASO002", 
-            "paciente": "P789012",
-            "diagnostico": "Reconstrucción corneal",
-            "tejido_requerido": "Córnea",
-            "urgencia": "Crítica",
-            "fecha_cirugia": "2025-06-12",
-            "estado": "Pendiente de Tejido"
-        }
-    ]
-    
-    for caso in casos_ejemplo:
-        urgencia_color = {
-            "Baja": "🟢",
-            "Media": "🟡", 
-            "Alta": "🟠",
-            "Crítica": "🔴"
-        }.get(caso['urgencia'], "⚪")
-        
-        st.markdown(f"""
-        <div class="feature-card">
-            <div style="display: flex; justify-content: between; align-items: flex-start;">
-                <div style="flex-grow: 1;">
-                    <h4>{caso['id_caso']} - {caso['diagnostico']}</h4>
-                    <p><strong>Paciente:</strong> {caso['paciente']}</p>
-                    <p><strong>Tejido Requerido:</strong> {caso['tejido_requerido']}</p>
-                    <p><strong>Cirugía Programada:</strong> {caso['fecha_cirugia']}</p>
-                </div>
-                <div style="text-align: right;">
-                    <div>{urgencia_color} {caso['urgencia']}</div>
-                    <div style="margin-top: 0.5rem;">
-                        <span class="status-badge status-pendiente">{caso['estado']}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.info("📝 **Nota:** Esta es una funcionalidad de demostración. En una implementación completa, los casos se almacenarían en la base de datos y se integrarían con el sistema de solicitudes.")
 
 # Cerrar conexión al final
 if conn:

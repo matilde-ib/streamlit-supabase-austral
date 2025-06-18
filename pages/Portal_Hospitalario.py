@@ -1,4 +1,4 @@
-# pages/dashboard_hospital.py (Estética Final y Funcionalidad Completa)
+# pages/Portal_Hospitalario.py (Estética Final y Funcionalidad Completa)
 
 import streamlit as st
 import pandas as pd
@@ -464,6 +464,7 @@ if opcion_utilidades == "Gestión de Inventario":
                 submitted_update = st.form_submit_button("Actualizar Estado", use_container_width=True)
 
                 if submitted_update:
+                    # Convertir numpy.int64 a int nativo de Python
                     id_to_update = int(tejido_sel_update.split(' ')[1])
                     query_update = "UPDATE tejidos SET estado = %s, fecha_de_estado = NOW() WHERE id = %s"
                     if execute_query(query_update, conn, (new_estado, id_to_update), is_select=False):
@@ -494,39 +495,133 @@ if opcion_utilidades == "Gestión de Inventario":
 
 elif opcion_utilidades == "Gestión de Solicitudes":
     st.title("📬 Gestión de Solicitudes de Médicos")
-    st.markdown("Revise y procese las solicitudes de tejido pendientes.")
+    st.markdown("Revise y procese las solicitudes de tejido pendientes para su hospital.")
     
-    solicitudes_df = execute_query("SELECT s.id, s.fecha_solicitud, s.tipo, s.ubicacion, m.nombre, m.apellido FROM solicitud s JOIN medico m ON s.medico_id = m.id WHERE s.estado = 'pendiente' ORDER BY s.fecha_solicitud ASC;", conn=conn, is_select=True)
+    # UPDATED QUERY: Using ubicacion field instead of hospital_id (matching current DB structure)
+    solicitudes_df = execute_query(
+        """
+        SELECT s.id, s.fecha_solicitud, s.tipo, m.nombre, m.apellido 
+        FROM solicitud s 
+        JOIN medico m ON s.medico_id = m.id 
+        WHERE s.estado = 'pendiente' AND s.ubicacion = %s
+        ORDER BY s.fecha_solicitud ASC
+        """, 
+        conn=conn, 
+        params=(hospital_nombre,), 
+        is_select=True
+    )
 
     if solicitudes_df.empty:
-        st.info("No hay solicitudes pendientes para revisar.")
+        st.info("No hay solicitudes pendientes para revisar en su hospital.")
     else:
-        st.subheader(f"Solicitudes Pendientes: {len(solicitudes_df)}")
+        st.subheader(f"Solicitudes Pendientes para su Hospital: {len(solicitudes_df)}")
         st.markdown("---")
         for _, row in solicitudes_df.iterrows():
             with st.container(border=True):
                 st.markdown(f"**ID:** {row['id']} | **Fecha:** {row['fecha_solicitud'].strftime('%d/%m/%Y')} | **Médico:** {row['nombre']} {row['apellido']}")
-                st.markdown(f"**Tejido Solicitado:** {row['tipo']} ({row['ubicacion']})")
+                st.markdown(f"**Tejido Solicitado:** {row['tipo']}")
                 c1, c2, _ = st.columns([1, 1, 8])
                 if c1.button("✅ Aprobar", key=f"approve_{row['id']}"):
-                    tejido_disponible_q = "SELECT id FROM tejidos WHERE tipo = %s AND estado = 'Disponible' AND id_hospital = %s LIMIT 1"
-                    tejido_disp_df = execute_query(tejido_disponible_q, conn, (row['tipo'], hospital_id), is_select=True)
+                    # Convertir numpy.int64 a int nativo de Python
+                    solicitud_id = int(row['id'])
+                    
+                    # PASO 1: Buscar tejido disponible del tipo solicitado en este hospital
+                    tejido_disponible_q = """
+                        SELECT id FROM tejidos 
+                        WHERE tipo = %s AND estado = 'Disponible' AND id_hospital = %s 
+                        ORDER BY fecha_recoleccion ASC
+                        LIMIT 1
+                    """
+                    tejido_disp_df = execute_query(
+                        tejido_disponible_q, 
+                        conn, 
+                        (row['tipo'], hospital_id), 
+                        is_select=True
+                    )
+                    
                     if not tejido_disp_df.empty:
-                        id_tejido_a_reservar = tejido_disp_df.iloc[0]['id']
-                        update_tejido_q = "UPDATE tejidos SET estado = 'Reservado' WHERE id = %s"
-                        execute_query(update_tejido_q, conn, (id_tejido_a_reservar,), is_select=False)
-                        update_solicitud_q = "UPDATE solicitud SET estado = 'aprobada' WHERE id = %s"
-                        execute_query(update_solicitud_q, conn, (row['id'],), is_select=False)
-                        st.success(f"Solicitud {row['id']} aprobada. Tejido ID {id_tejido_a_reservar} ha sido reservado.")
-                        st.rerun()
+                        id_tejido_a_reservar = int(tejido_disp_df.iloc[0]['id'])
+                        
+                        # PASO 2: Actualizar el estado del tejido a 'Reservado'
+                        update_tejido_q = """
+                            UPDATE tejidos 
+                            SET estado = 'Reservado', fecha_de_estado = NOW() 
+                            WHERE id = %s AND estado = 'Disponible'
+                        """
+                        tejido_actualizado = execute_query(
+                            update_tejido_q, 
+                            conn, 
+                            (id_tejido_a_reservar,), 
+                            is_select=False
+                        )
+                        
+                        if tejido_actualizado:
+                            # PASO 3: Solo si el tejido se actualizó correctamente, aprobar la solicitud
+                            update_solicitud_q = """
+                                UPDATE solicitud 
+                                SET estado = 'aprobada' 
+                                WHERE id = %s
+                            """
+                            solicitud_actualizada = execute_query(
+                                update_solicitud_q, 
+                                conn, 
+                                (solicitud_id,), 
+                                is_select=False
+                            )
+                            
+                            if solicitud_actualizada:
+                                st.success(f"✅ Solicitud {solicitud_id} aprobada exitosamente!")
+                                st.info(f"📦 Tejido ID {id_tejido_a_reservar} reservado para el médico.")
+                                st.cache_data.clear()
+                                st.rerun()
+                            else:
+                                st.error("❌ Error al actualizar el estado de la solicitud.")
+                        else:
+                            st.error("❌ Error al reservar el tejido. Es posible que ya no esté disponible.")
                     else:
-                        st.warning(f"No hay tejidos de tipo '{row['tipo']}' disponibles para aprobar esta solicitud.")
-                
+                        st.warning(f"⚠️ No hay tejidos de tipo '{row['tipo']}' disponibles en su hospital para aprobar esta solicitud.")
                 if c2.button("❌ Rechazar", key=f"reject_{row['id']}"):
+                    # Convertir numpy.int64 a int nativo de Python
+                    solicitud_id = int(row['id'])
                     update_solicitud_q = "UPDATE solicitud SET estado = 'rechazada' WHERE id = %s"
-                    execute_query(update_solicitud_q, conn, (row['id'],), is_select=False)
-                    st.success(f"Solicitud {row['id']} rechazada.")
+                    execute_query(update_solicitud_q, conn, (solicitud_id,), is_select=False)
+                    st.success(f"Solicitud {solicitud_id} rechazada.")
                     st.rerun()
+    
+    # SECCIÓN DE DEBUG TEMPORAL - Agregar después de las solicitudes
+    with st.expander("🔍 Debug: Ver Estado de Tejidos (Temporal)", expanded=False):
+        debug_query = """
+        SELECT t.id, t.tipo, t.estado, t.fecha_de_estado, dt.descripcion
+        FROM tejidos t
+        LEFT JOIN detalles_tejido dt ON t.tipo = dt.tipo
+        WHERE t.id_hospital = %s
+        ORDER BY t.fecha_de_estado DESC
+        LIMIT 10
+        """
+        debug_tejidos = execute_query(debug_query, conn, (hospital_id,), is_select=True)
+        
+        if not debug_tejidos.empty:
+            st.subheader("Últimos 10 tejidos de tu hospital:")
+            st.dataframe(debug_tejidos, use_container_width=True)
+        else:
+            st.info("No hay tejidos para mostrar")
+            
+        # También mostrar solicitudes pendientes con más detalle - FIXED QUERY
+        debug_solicitudes_query = """
+        SELECT s.id, s.tipo, s.estado, s.fecha_solicitud, m.nombre, m.apellido, s.ubicacion,
+               COUNT(t.id) as tejidos_disponibles_tipo
+        FROM solicitud s 
+        JOIN medico m ON s.medico_id = m.id 
+        LEFT JOIN tejidos t ON t.tipo = s.tipo AND t.estado = 'Disponible' AND t.id_hospital = %s
+        WHERE s.estado = 'pendiente' AND s.ubicacion = %s
+        GROUP BY s.id, s.tipo, s.estado, s.fecha_solicitud, m.nombre, m.apellido, s.ubicacion
+        ORDER BY s.fecha_solicitud ASC
+        """
+        debug_solicitudes = execute_query(debug_solicitudes_query, conn, (hospital_id, hospital_nombre), is_select=True)
+        
+        if not debug_solicitudes.empty:
+            st.subheader("Debug de Solicitudes Pendientes:")
+            st.dataframe(debug_solicitudes, use_container_width=True)
 
 elif opcion_utilidades == "Dashboard Analítico":
     st.title("📊 Dashboard Analítico")

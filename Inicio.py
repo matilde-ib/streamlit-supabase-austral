@@ -155,9 +155,9 @@ def show_login_form():
                     st.success(f"¡Bienvenido/a, {user_name} ({role})!")
                     # Redirigir al usuario
                     if role == "Médico":
-                        st.page_link("pages/dashboard_medico.py", label="Ir a mi Dashboard de Médico", icon="🩺")
+                        st.page_link("pages/Portal_Médico.py", label="Ir a mi Dashboard de Médico", icon="🩺")
                     elif role == "Hospital":
-                        st.page_link("pages/dashboard_hospital.py", label="Ir a mi Dashboard de Hospital", icon="🏥")
+                        st.page_link("pages/Portal_Hospitalario.py", label="Ir a mi Dashboard de Hospital", icon="🏥")
                     
                 else:
                     st.error("Usuario o clave incorrectos, o usuario no registrado.")
@@ -236,9 +236,9 @@ else:
     st.write("Por favor, usa los enlaces de la barra lateral para navegar a tu dashboard.")
 
     if st.session_state["role"] == "Médico":
-        st.page_link("pages/dashboard_medico.py", label="Ir a mi Dashboard de Médico", icon="🩺")
+        st.page_link("pages/Portal_Médico.py", label="Ir a mi Dashboard de Médico", icon="🩺")
     elif st.session_state["role"] == "Hospital":
-        st.page_link("pages/dashboard_hospital.py", label="Ir a mi Dashboard de Hospital", icon="🏥")
+        st.page_link("pages/Portal_Hospitalario.py", label="Ir a mi Dashboard de Hospital", icon="🏥")
     
     st.sidebar.markdown("---")
     if st.sidebar.button("Cerrar sesión", key="logout_button"):
