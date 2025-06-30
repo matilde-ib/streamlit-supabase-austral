@@ -1,24 +1,21 @@
-# app.py (pagina 2) - Archivo Principal de Login/Registro y Redirección
+# Inicio.py - App Principal de Login/Registro y Redirección
 
 import streamlit as st
 import sys
 import os
 import hashlib
-import pandas as pd # Aunque no se usa directamente para dataframes aquí, es una dependencia común
-from datetime import datetime # No se usa directamente aquí, pero es una dependencia común
+import pandas as pd
+from datetime import datetime
 
 # Ajusta el path para importar 'functions.py'
-# Si app.py está en la raíz y functions.py también, sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-# podría no ser necesario si streamlit lo detecta automáticamente, pero es seguro mantenerlo.
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from functions import connect_to_supabase, execute_query # Asegúrate de que functions.py esté definido y correcto
+from functions import connect_to_supabase, execute_query
 
 # --- Configuración de la página ---
 st.set_page_config(
     page_title="TissBank",
     page_icon="🧬",
-    layout="centered" # Volvemos a 'centered' para el login/registro
+    layout="centered"
 )
 
 # --- Logo centrado ---
@@ -26,11 +23,20 @@ col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
     st.image("images/logo.png", width=300)
 
+# --- Super Host Settings ---
+SUPER_HOST_TELEFONO = "1127289095"
+SUPER_HOST_PASSWORD = "mati123"
+
+def es_super_host(identifier, password):
+    return (identifier == SUPER_HOST_TELEFONO) and (password == SUPER_HOST_PASSWORD)
+
 # --- Inicializar estado de sesión ---
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 if "user_identifier" not in st.session_state:
     st.session_state["user_identifier"] = ""
+if "plain_password" not in st.session_state:
+    st.session_state["plain_password"] = ""
 if "role" not in st.session_state:
     st.session_state["role"] = ""
 if "user_id" not in st.session_state:
@@ -40,7 +46,7 @@ if "user_name" not in st.session_state:
 if "show_register" not in st.session_state:
     st.session_state["show_register"] = False
 
-# --- Hashing de Contraseñas (Básico, para ejemplo. ¡Usa bcrypt en producción!) ---
+# --- Hashing de Contraseñas (Básico, para ejemplo) ---
 def hash_password(password):
     return hashlib.sha256(password.encode()).hexdigest()
 
@@ -61,7 +67,7 @@ def authenticate_user(identifier, password):
         conn.close()
         return True, "Médico", user_id, user_name
 
-    query_hospital = "SELECT id, telefono, nombre FROM hospital WHERE telefono = %s AND password = %s" # No necesitamos direccion aquí
+    query_hospital = "SELECT id, telefono, nombre FROM hospital WHERE telefono = %s AND password = %s"
     hospital_data = execute_query(query_hospital, conn=conn, params=(identifier, hashed_password), is_select=True)
     if not hospital_data.empty:
         user_id = hospital_data.iloc[0]['id']
@@ -148,17 +154,16 @@ def show_login_form():
                 if is_authenticated:
                     st.session_state["logged_in"] = True
                     st.session_state["user_identifier"] = identifier
+                    st.session_state["plain_password"] = password  # GUARDAMOS LA PASSWORD PLANA PARA VALIDAR SUPER HOST
                     st.session_state["role"] = role
                     st.session_state["user_id"] = user_id
                     st.session_state["user_name"] = user_name
-                    # No hacemos rerun directo, sino que dependemos del page_link
                     st.success(f"¡Bienvenido/a, {user_name} ({role})!")
                     # Redirigir al usuario
                     if role == "Médico":
                         st.page_link("pages/Portal_Médico.py", label="Ir a mi Dashboard de Médico", icon="🩺")
                     elif role == "Hospital":
                         st.page_link("pages/Portal_Hospitalario.py", label="Ir a mi Dashboard de Hospital", icon="🏥")
-                    
                 else:
                     st.error("Usuario o clave incorrectos, o usuario no registrado.")
             else:
@@ -167,7 +172,6 @@ def show_login_form():
 # --- Función para mostrar el formulario de registro unificado ---
 def show_register_form():
     st.subheader("Registro de Usuario")
-    
     selected_role = st.selectbox("¿Qué tipo de usuario vas a registrar?", ["Médico", "Hospital"])
 
     if selected_role == "Médico":
@@ -193,30 +197,36 @@ def show_register_form():
                         st.session_state["show_register"] = False
                         st.rerun()
     elif selected_role == "Hospital":
-        with st.form("form_registro_hospital"):
-            st.write("### Datos del Hospital")
-            nombre = st.text_input("Nombre del Hospital")
-            direccion = st.text_input("Dirección")
-            telefono = st.text_input("Teléfono (Será tu usuario para iniciar sesión)", max_chars=15)
-            password = st.text_input("Contraseña", type="password")
-            confirm_password = st.text_input("Confirmar Contraseña", type="password")
-            
-            submit = st.form_submit_button("Registrar Hospital")
+        # SOLO el Super Host puede ver este bloque:
+        if (
+            st.session_state.get("logged_in")
+            and es_super_host(st.session_state.get("user_identifier", ""), st.session_state.get("plain_password", ""))
+        ):
+            with st.form("form_registro_hospital"):
+                st.write("### Datos del Hospital")
+                nombre = st.text_input("Nombre del Hospital")
+                direccion = st.text_input("Dirección")
+                telefono = st.text_input("Teléfono (Será tu usuario para iniciar sesión)", max_chars=15)
+                password = st.text_input("Contraseña", type="password")
+                confirm_password = st.text_input("Confirmar Contraseña", type="password")
+                
+                submit = st.form_submit_button("Registrar Hospital")
 
-            if submit:
-                if not all([nombre, direccion, telefono, password, confirm_password]):
-                    st.warning("Por favor completá todos los campos.")
-                elif password != confirm_password:
-                    st.error("Las contraseñas no coinciden.")
-                else:
-                    data = {"nombre": nombre, "direccion": direccion, "telefono": telefono, "password": password}
-                    if register_user("Hospital", data):
-                        st.success("✅ Hospital registrado correctamente. Ya puedes iniciar sesión.")
-                        st.session_state["show_register"] = False
-                        st.rerun()
+                if submit:
+                    if not all([nombre, direccion, telefono, password, confirm_password]):
+                        st.warning("Por favor completá todos los campos.")
+                    elif password != confirm_password:
+                        st.error("Las contraseñas no coinciden.")
+                    else:
+                        data = {"nombre": nombre, "direccion": direccion, "telefono": telefono, "password": password}
+                        if register_user("Hospital", data):
+                            st.success("✅ Hospital registrado correctamente. Ya puedes iniciar sesión.")
+                            st.session_state["show_register"] = False
+                            st.rerun()
+        else:
+            st.error("Sólo el super host puede crear usuarios hospitalarios. Iniciá sesión como super host para continuar.")
 
 # --- Lógica principal de la aplicación ---
-# Si no está logueado, muestra los formularios de login/registro
 if not st.session_state.get("logged_in", False):
     if st.session_state["show_register"]:
         show_register_form()
@@ -231,7 +241,6 @@ if not st.session_state.get("logged_in", False):
             st.session_state["show_register"] = True
             st.rerun()
 else:
-    # Si ya está logueado, se le muestra la opción para ir a su dashboard
     st.success(f"Sesión activa: {st.session_state['user_name']} ({st.session_state['role']}).")
     st.write("Por favor, usa los enlaces de la barra lateral para navegar a tu dashboard.")
 
@@ -243,7 +252,7 @@ else:
     st.sidebar.markdown("---")
     if st.sidebar.button("Cerrar sesión", key="logout_button"):
         # Limpiar todas las variables de sesión relevantes al cerrar sesión
-        for key in list(st.session_state.keys()): # Limpia todas las claves, o puedes especificar cuáles
+        for key in list(st.session_state.keys()):
             st.session_state.pop(key, None)
-        st.session_state["logged_in"] = False # Asegura que logged_in es False
+        st.session_state["logged_in"] = False
         st.rerun()
