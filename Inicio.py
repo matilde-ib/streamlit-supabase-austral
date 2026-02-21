@@ -34,7 +34,7 @@ if "show_register" not in st.session_state:
     st.session_state["show_register"] = False
 
 # --- SUPERHOST ---
-SUPERHOST_PHONE = "1127289095"
+SUPERHOST_PHONE = "000000"
 SUPERHOST_PASSWORD = "mati123"
 SUPERHOST_HASH = hashlib.sha256(SUPERHOST_PASSWORD.encode()).hexdigest()
 
