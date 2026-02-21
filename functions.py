@@ -48,7 +48,9 @@ def connect_to_supabase():
             database=db_name,
             user=db_user,
             password=db_password,
-            port=db_port
+            port=db_port,
+            sslmode="require"
+
         )
         return conn
     except Exception as e:
